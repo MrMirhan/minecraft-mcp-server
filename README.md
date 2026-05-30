@@ -120,6 +120,49 @@ Once connected to a Minecraft server, Claude can use these commands:
 ### Game State
 - `detect-gamemode` - Detect the gamemode on game
 
+## Running with Docker
+
+The server can also run over an HTTP transport (MCP Streamable HTTP) inside a container, which is useful for remote/hosted setups. stdio mode remains the default for local Claude Desktop usage (`node dist/main.js`).
+
+```bash
+docker build -t minecraft-mcp-server .
+docker run --rm -p 3000:3000 \
+  -e SERVER_PORT=3000 \
+  -e MCP_AUTH_TOKEN=your-long-token \
+  minecraft-mcp-server
+```
+
+The MCP endpoint is then served at `http://HOST:3000/mcp` and protected by the bearer token. `MC_HOST` is left empty by default, so the server starts idle and the agent joins a Minecraft server at runtime via the `connect-to-server` tool.
+
+Point an MCP client that supports the Streamable HTTP URL transport at the endpoint, sending the token as an `Authorization` header:
+
+```json
+{
+  "mcpServers": {
+    "minecraft": {
+      "url": "http://HOST:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer your-long-token"
+      }
+    }
+  }
+}
+```
+
+## Pterodactyl
+
+The repository ships a Pterodactyl egg at `pterodactyl/egg-minecraft-mcp-server.json`. Import it from the panel (Admin → Nests → Import Egg). The egg pulls the prebuilt image `ghcr.io/mrmirhan/minecraft-mcp-server:latest`.
+
+To deploy:
+
+1. Create a server from the egg and set `MCP_AUTH_TOKEN` (required, min 16 chars).
+2. Allocate a port — Wings injects it as `SERVER_PORT`, so no port variable is needed.
+3. Start the server. The console reports `Listening on port <PORT> (MCP Streamable HTTP at /mcp)` once ready.
+
+The agent then connects to `http://<pterodactyl-ip>:<port>/mcp` with the bearer token and uses the `connect-to-server` tool to join any Minecraft server. Leave `MC_HOST` empty to start idle, or set `MC_HOST`/`MC_PORT`/`MC_USERNAME` to auto-connect at boot.
+
+> GitHub Packages images default to **private**. Make the GHCR package public (Package settings → Change visibility → Public), or configure Wings node registry credentials, so Wings can pull the image.
+
 ## Contributing
 
 Feel free to submit pull requests or open issues for improvements. All refactoring commits, functional and test contributions, issues and discussion are greatly appreciated!

@@ -1,0 +1,72 @@
+{
+    "_comment": "Pterodactyl egg for the Minecraft MCP Server (HTTP transport). Image-based: the app is baked into the Docker image at /app. Wings bind-mounts the server volume over /home/container at runtime, so the startup command launches the app via its absolute path. The GHCR image must be PUBLIC (or the node configured with registry credentials) for Wings to pull it.",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-01-01T00:00:00+00:00",
+    "name": "Minecraft MCP Server",
+    "author": "hamzaalmendi@gmail.com",
+    "description": "Minecraft MCP Server exposed over the MCP Streamable HTTP transport. The endpoint is served at /mcp on the allocated port and protected by a bearer token (MCP_AUTH_TOKEN). Leave MC_HOST empty to start idle and let the agent join servers at runtime via the connect-to-server tool.",
+    "features": null,
+    "docker_images": {
+        "Node 22 (GHCR)": "ghcr.io/mrmirhan/minecraft-mcp-server:latest"
+    },
+    "file_denylist": [],
+    "startup": "node /app/dist/main.js --transport http",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"Listening on port\"}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\necho \"Image-based egg, no install steps.\"\nexit 0",
+            "container": "node:22-bookworm-slim",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "MCP Auth Token",
+            "description": "Bearer token that protects the /mcp endpoint. Clients must send 'Authorization: Bearer <token>'. Required: leaving it empty would expose the endpoint unauthenticated.",
+            "env_variable": "MCP_AUTH_TOKEN",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|min:16",
+            "field_type": "text"
+        },
+        {
+            "name": "Minecraft Host",
+            "description": "Optional Minecraft server host to auto-connect to at boot. Leave empty to start idle and use the connect-to-server tool at runtime.",
+            "env_variable": "MC_HOST",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:255",
+            "field_type": "text"
+        },
+        {
+            "name": "Minecraft Port",
+            "description": "Minecraft server port used when MC_HOST is set.",
+            "env_variable": "MC_PORT",
+            "default_value": "25565",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|numeric|digits_between:1,5",
+            "field_type": "text"
+        },
+        {
+            "name": "Bot Username",
+            "description": "Username the bot uses when joining a Minecraft server.",
+            "env_variable": "MC_USERNAME",
+            "default_value": "LLMBot",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:32",
+            "field_type": "text"
+        }
+    ]
+}
