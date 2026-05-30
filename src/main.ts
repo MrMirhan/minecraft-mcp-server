@@ -17,6 +17,7 @@ import { registerFlightTools } from './tools/flight-tools.js';
 import { registerGameStateTools } from './tools/gamestate-tools.js';
 import { registerCraftingTools } from './tools/crafting-tools.js';
 import { registerFurnaceTools } from './tools/furnace-tools.js';
+import { registerConnectionTools } from './tools/connection-tools.js';
 
 setupStdioFiltering();
 
@@ -40,7 +41,10 @@ async function main() {
     }
   );
 
-  connection.connect();
+  const explicitHost = process.argv.some(arg => arg === '--host' || arg.startsWith('--host='));
+  if (explicitHost) {
+    connection.connect();
+  }
 
   const server = new McpServer({
     name: "minecraft-mcp-server",
@@ -59,6 +63,7 @@ async function main() {
   registerGameStateTools(factory, getBot);
   registerCraftingTools(factory, getBot);
   registerFurnaceTools(factory, getBot);
+  registerConnectionTools(factory, connection);
 
   process.stdin.on('end', () => {
     connection.cleanup();
