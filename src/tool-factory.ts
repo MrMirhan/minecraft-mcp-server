@@ -70,7 +70,7 @@ export class ToolFactory {
       return z.object(schema).passthrough().parse(args ?? {});
     } catch (error) {
       if (error instanceof ZodError) {
-        throw new Error(this.formatZodError(error));
+        throw new Error(this.formatZodError(error), { cause: error });
       }
       throw error;
     }
