@@ -56,7 +56,7 @@ RUN cd node_modules/prismarine-viewer/public/textures \
 # Versions are pinned, not "latest" — a moving NeoForge/mod version breaks reproducible
 # builds. Runs offline-mode (fake username/uuid/token below): the user has no premium account.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 jq \
+    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 jq curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=java21 /opt/java/openjdk /opt/java/openjdk
