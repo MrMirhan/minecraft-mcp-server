@@ -3,6 +3,9 @@ import mineflayer from 'mineflayer';
 import minecraftData from 'minecraft-data';
 import { ToolFactory } from '../tool-factory.js';
 import { log } from '../logger.js';
+import { ActionManager, raceWithAbort } from '../action-manager.js';
+
+const CRAFT_TIMEOUT_MS = 30000;
 
 interface RecipeIngredient {
   name: string;
@@ -335,7 +338,7 @@ function getAllRecipes(mcData: unknown): unknown[] {
   return [];
 }
 
-export function registerCraftingTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
+export function registerCraftingTools(factory: ToolFactory, getBot: () => mineflayer.Bot, actionManager: ActionManager): void {
   factory.registerTool(
     "list-recipes",
     "List all available crafting recipes the bot can make with current inventory",
@@ -415,67 +418,92 @@ export function registerCraftingTools(factory: ToolFactory, getBot: () => minefl
         return factory.createErrorResponse("No recipes available");
       }
 
-      let craftedCount = 0;
-      let lastError = "";
-
       const table = findNearbyCraftingTable(bot, mcData);
       const candidatesFromBotNoTable = collectCandidateRecipesFromBot(bot, mcData, outputQuery, itemsById, null);
       const candidatesFromBotWithTable = table ? collectCandidateRecipesFromBot(bot, mcData, outputQuery, itemsById, table) : [];
       const candidatesFromBot = candidatesFromBotNoTable.length > 0 ? candidatesFromBotNoTable : candidatesFromBotWithTable;
       const candidates = candidatesFromBot.length > 0 ? candidatesFromBot : collectCandidateRecipes(recipes, outputQuery, itemsById);
 
-      for (let attempt = 0; attempt < amount; attempt++) {
-        const currentInventory = bot.inventory.items().map(item => ({ name: item.name, count: item.count }));
-        let craftedThisAttempt = false;
-        let bestCannotCraft: { missingTotal: number; message: string } | null = null;
+      const result = await actionManager.run("craft-item", CRAFT_TIMEOUT_MS, async (ctx) => {
+        let craftedCount = 0;
+        let lastError = "";
 
-        for (const candidate of candidates) {
-          const evaluation = evaluateRecipeMissing(candidate.recipe, currentInventory, itemsById);
-
-          if (!evaluation.canCraft) {
-            let msg = `Cannot craft ${candidate.resultName}. Missing:\n`;
-            for (const { name, count } of evaluation.missing) {
-              msg += `- ${name} x${count}\n`;
-            }
-            if (!bestCannotCraft || evaluation.missingTotal < bestCannotCraft.missingTotal) {
-              bestCannotCraft = { missingTotal: evaluation.missingTotal, message: msg };
-            }
-            continue;
-          }
-
-          try {
-            if (candidate.craftingTable) {
-              await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1, candidate.craftingTable as Parameters<typeof bot.craft>[2]);
-            } else {
-              await bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1);
-            }
-            craftedCount++;
-            craftedThisAttempt = true;
-            log('info', `Crafted ${candidate.resultName}`);
+        for (let attempt = 0; attempt < amount; attempt++) {
+          if (ctx.signal.aborted) {
             break;
-          } catch (err) {
-            lastError = err instanceof Error ? err.message : String(err);
-            log('warn', `Failed to craft ${outputItem}: ${lastError}`);
+          }
+
+          const currentInventory = bot.inventory.items().map(item => ({ name: item.name, count: item.count }));
+          let craftedThisAttempt = false;
+          let bestCannotCraft: { missingTotal: number; message: string } | null = null;
+
+          for (const candidate of candidates) {
+            const evaluation = evaluateRecipeMissing(candidate.recipe, currentInventory, itemsById);
+
+            if (!evaluation.canCraft) {
+              let msg = `Cannot craft ${candidate.resultName}. Missing:\n`;
+              for (const { name, count } of evaluation.missing) {
+                msg += `- ${name} x${count}\n`;
+              }
+              if (!bestCannotCraft || evaluation.missingTotal < bestCannotCraft.missingTotal) {
+                bestCannotCraft = { missingTotal: evaluation.missingTotal, message: msg };
+              }
+              continue;
+            }
+
+            try {
+              // bot.craft() can hang forever waiting for a windowOpen that never arrives (an
+              // unreachable crafting table). raceWithAbort frees this caller on abort, but it
+              // cannot cancel mineflayer's own pending craft; that promise keeps running
+              // detached and its eventual result is discarded (see ActionManager.run).
+              const craftPromise = candidate.craftingTable
+                ? bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1, candidate.craftingTable as Parameters<typeof bot.craft>[2])
+                : bot.craft(candidate.recipe as Parameters<typeof bot.craft>[0], 1);
+              await raceWithAbort(craftPromise, ctx.signal, () => undefined);
+              craftedCount++;
+              craftedThisAttempt = true;
+              log('info', `Crafted ${candidate.resultName}`);
+              break;
+            } catch (err) {
+              lastError = err instanceof Error ? err.message : String(err);
+              if (ctx.signal.aborted) {
+                break;
+              }
+              log('warn', `Failed to craft ${outputItem}: ${lastError}`);
+            }
+          }
+
+          if (ctx.signal.aborted) {
+            break;
+          }
+
+          if (!craftedThisAttempt && attempt === 0) {
+            if (bestCannotCraft) {
+              throw new Error(bestCannotCraft.message);
+            }
+            throw new Error(`Failed to craft ${outputItem}: ${lastError || 'Recipe not found or missing ingredients'}`);
+          }
+
+          if (!craftedThisAttempt) {
+            break;
           }
         }
 
-        if (!craftedThisAttempt && attempt === 0) {
-          if (bestCannotCraft) {
-            return factory.createErrorResponse(bestCannotCraft.message);
+        if (ctx.signal.aborted) {
+          if (craftedCount > 0) {
+            return `Crafted ${outputItem} ${craftedCount} of ${amount} requested time(s) before being interrupted`;
           }
-          return factory.createErrorResponse(`Failed to craft ${outputItem}: ${lastError || 'Recipe not found or missing ingredients'}`);
+          throw new Error(`Craft of ${outputItem} was interrupted before completing: ${lastError || 'no items crafted'}`);
         }
 
-        if (!craftedThisAttempt) {
-          break;
+        if (craftedCount === 0) {
+          throw new Error(`Failed to craft ${outputItem}: ${lastError || "Missing ingredients or recipe not found"}`);
         }
-      }
 
-      if (craftedCount === 0) {
-        return factory.createErrorResponse(`Failed to craft ${outputItem}: ${lastError || "Missing ingredients or recipe not found"}`);
-      }
+        return `Successfully crafted ${outputItem} ${craftedCount} time(s)`;
+      });
 
-      return factory.createResponse(`Successfully crafted ${outputItem} ${craftedCount} time(s)`);
+      return result.success ? factory.createResponse(result.message) : factory.createErrorResponse(result.message);
     }
   );
 

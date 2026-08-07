@@ -2,6 +2,7 @@ import mineflayer from 'mineflayer';
 import pathfinderPkg from 'mineflayer-pathfinder';
 const { pathfinder, Movements } = pathfinderPkg;
 import minecraftData from 'minecraft-data';
+import { WebViewer, attachUiState } from './web-viewer.js';
 
 const SUPPORTED_MINECRAFT_VERSION = '1.21.11';
 
@@ -29,6 +30,7 @@ export class BotConnection {
   private manuallyDisconnected = false;
   private hasTarget = false;
   private readonly reconnectDelayMs: number;
+  private readonly webViewer = new WebViewer();
 
   constructor(config: BotConfig, callbacks: ConnectionCallbacks, reconnectDelayMs = 2000) {
     this.config = config;
@@ -46,6 +48,10 @@ export class BotConnection {
 
   getConfig(): BotConfig {
     return this.config;
+  }
+
+  getWebViewer(): WebViewer {
+    return this.webViewer;
   }
 
   isConnected(): boolean {
@@ -70,6 +76,7 @@ export class BotConnection {
     };
 
     const bot = mineflayer.createBot(botOptions);
+    attachUiState(bot);
     this.registerEventHandlers(bot);
     return bot;
   }
@@ -77,6 +84,7 @@ export class BotConnection {
   private registerEventHandlers(bot: mineflayer.Bot): void {
     bot.once('spawn', async () => {
       this.state = 'connected';
+      this.webViewer.rebind(bot);
       this.callbacks.onLog('info', 'Bot spawned in world');
 
       const mcData = minecraftData(bot.version);
@@ -121,6 +129,7 @@ export class BotConnection {
       }
 
       if (this.bot === bot) {
+        this.webViewer.rebind(null);
         try {
           bot.removeAllListeners();
           this.bot = null;
@@ -154,6 +163,7 @@ export class BotConnection {
         } catch (err) {
           this.callbacks.onLog('warn', `Error while cleaning up old bot: ${this.formatError(err)}`);
         }
+        this.webViewer.rebind(null);
       }
 
       this.callbacks.onLog('info', 'Creating new bot instance...');
@@ -175,6 +185,7 @@ export class BotConnection {
         this.callbacks.onLog('warn', `Error while quitting previous bot: ${this.formatError(err)}`);
       }
     }
+    this.webViewer.rebind(null);
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -264,6 +275,7 @@ export class BotConnection {
       } catch (err) {
         this.callbacks.onLog('warn', `Error while disconnecting bot: ${this.formatError(err)}`);
       }
+      this.webViewer.rebind(null);
       this.bot = null;
     }
 
@@ -326,6 +338,7 @@ export class BotConnection {
   }
 
   cleanup(): void {
+    this.webViewer.stop();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

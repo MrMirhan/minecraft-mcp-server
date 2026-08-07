@@ -12,11 +12,24 @@ function makeConnection(): BotConnection {
   );
 }
 
-test.serial('createMcpServer registers all 25 tools', (t) => {
+test.serial('createMcpServer registers all 44 tools', (t) => {
   const toolSpy = sinon.spy(McpServer.prototype, 'tool');
   try {
     createMcpServer(makeConnection(), new MessageStore());
-    t.is(toolSpy.callCount, 25);
+    t.is(toolSpy.callCount, 44);
+  } finally {
+    toolSpy.restore();
+  }
+});
+
+test.serial('createMcpServer wires the ui and render tools', (t) => {
+  const toolSpy = sinon.spy(McpServer.prototype, 'tool');
+  try {
+    createMcpServer(makeConnection(), new MessageStore());
+    const names = toolSpy.getCalls().map((call) => call.args[0] as string);
+    for (const name of ['read-scoreboard', 'read-window', 'read-tablist', 'read-bossbar', 'read-title', 'read-teams', 'get-resource-pack', 'take-screenshot', 'render-window']) {
+      t.true(names.includes(name), `${name} must be registered`);
+    }
   } finally {
     toolSpy.restore();
   }

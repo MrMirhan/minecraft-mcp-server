@@ -1,6 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { registerCraftingTools } from '../src/tools/crafting-tools.js';
+import { ActionManager } from '../src/action-manager.js';
 import { ToolFactory } from '../src/tool-factory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { BotConnection } from '../src/bot-connection.js';
@@ -89,7 +90,8 @@ test('registerCraftingTools registers all 4 tools', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerCraftingTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const toolNames = toolCalls.map(call => call.args[0]);
@@ -117,7 +119,8 @@ test('can-craft with empty inventory returns missing items', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerCraftingTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const canCraftCall = toolCalls.find(call => call.args[0] === 'can-craft');
@@ -148,7 +151,8 @@ test('get-recipe returns recipe structure for valid item', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerCraftingTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getRecipeCall = toolCalls.find(call => call.args[0] === 'get-recipe');
@@ -193,7 +197,8 @@ test('list-recipes returns proper structure', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerCraftingTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const listRecipesCall = toolCalls.find(call => call.args[0] === 'list-recipes');
@@ -224,7 +229,8 @@ test('craft-item returns error when recipe not available', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerCraftingTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const craftItemCall = toolCalls.find(call => call.args[0] === 'craft-item');
@@ -264,7 +270,8 @@ test('craft-item crafts successfully when ingredients are available', async (t) 
     craft: craftStub
   } as unknown as mineflayer.Bot;
 
-  registerCraftingTools(factory, () => mockBot);
+  const actionManager = new ActionManager();
+  registerCraftingTools(factory, () => mockBot, actionManager);
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const craftItemCall = toolCalls.find(call => call.args[0] === 'craft-item');
   const executor = craftItemCall!.args[3];
@@ -278,8 +285,67 @@ test('craft-item crafts successfully when ingredients are available', async (t) 
 
 test('uses real minecraft-data recipes for version 1.21.8', async (t) => {
   const mcData = minecraftData('1.21.8');
-  
+
   t.truthy(mcData.recipes);
   const isValid = mcData.recipes && (Array.isArray(mcData.recipes) || typeof mcData.recipes === 'object');
   t.true(isValid);
+});
+
+test('craft-item is freed by interrupt() while bot.craft() is still pending, and the abandoned craft cannot corrupt state later', async (t) => {
+  const mcData = minecraftData('1.21.8');
+  const recipes = flattenRecipes((mcData as unknown as { recipes: unknown }).recipes);
+  const stickId = (mcData as unknown as { itemsByName: Record<string, { id: number }> }).itemsByName.stick.id;
+
+  const stickRecipe = recipes.find((recipe) => {
+    const r = recipe as Record<string, unknown>;
+    const result = r.result as Record<string, unknown> | undefined;
+    return !!result && typeof result.id === 'number' && result.id === stickId;
+  });
+
+  t.truthy(stickRecipe);
+
+  const ingredientCounts = countRecipeIngredients(mcData, stickRecipe);
+  const inventoryItems = Object.entries(ingredientCounts).map(([name, count], idx) => ({ name, count, slot: idx }));
+
+  const mockServer = { tool: sinon.stub() } as unknown as McpServer;
+  const mockConnection = { checkConnectionAndReconnect: sinon.stub().resolves({ connected: true }) } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+  const actionManager = new ActionManager();
+
+  const craftGate: { release: (() => void) | null } = { release: null };
+  let secondCraftStarted = false;
+  const craftStub = sinon.stub();
+  craftStub.onCall(0).callsFake(() => new Promise<void>((resolve) => { craftGate.release = () => resolve(); }));
+  craftStub.onCall(1).callsFake(async () => { secondCraftStarted = true; });
+
+  const mockBot = {
+    version: '1.21.8',
+    inventory: { items: () => inventoryItems },
+    craft: craftStub
+  } as unknown as mineflayer.Bot;
+
+  registerCraftingTools(factory, () => mockBot, actionManager);
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const craftItemCall = toolCalls.find(call => call.args[0] === 'craft-item');
+  const executor = craftItemCall!.args[3];
+
+  const resultPromise = executor({ outputItem: 'stick', amount: 3 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // bot.craft() never settles on its own (the gate is never released here); interrupt() must
+  // still return promptly because raceWithAbort frees craft-item's caller on abort.
+  await actionManager.interrupt();
+
+  const result = await resultPromise;
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('interrupted'));
+  t.false(secondCraftStarted);
+  t.is(actionManager.getCurrentAction(), null);
+
+  // The abandoned bot.craft() promise finally settles late; it must not resurrect this
+  // already-finished call or leave the manager in a corrupted state.
+  craftGate.release?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  t.is(actionManager.getCurrentAction(), null);
 });

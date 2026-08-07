@@ -1,6 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { registerPositionTools } from '../src/tools/position-tools.js';
+import { ActionManager } from '../src/action-manager.js';
 import { ToolFactory } from '../src/tool-factory.js';
 import { BotConnection } from '../src/bot-connection.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -18,7 +19,8 @@ test('registerPositionTools registers get-position tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getPositionCall = toolCalls.find(call => call.args[0] === 'get-position');
@@ -38,7 +40,8 @@ test('registerPositionTools registers move-to-position tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -63,7 +66,8 @@ test('get-position returns current bot position', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getPositionCall = toolCalls.find(call => call.args[0] === 'get-position');
@@ -96,7 +100,8 @@ test('move-to-position returns error when pathfinding fails', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -128,7 +133,8 @@ test.serial('move-to-position returns timeout error and stops pathfinder', async
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -160,7 +166,8 @@ test('move-to-position succeeds without timeout and does not stop pathfinder', a
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -193,7 +200,8 @@ test.serial('move-to-position succeeds before timeout and does not stop pathfind
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -224,7 +232,8 @@ test('move-to-position preserves pathfinder error when not timing out', async (t
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerPositionTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerPositionTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
@@ -235,4 +244,123 @@ test('move-to-position preserves pathfinder error when not timing out', async (t
   t.true(result.isError);
   t.true(result.content[0].text.includes('Path was stopped before it could be completed'));
   t.true((mockBot.pathfinder!.stop as sinon.SinonStub).notCalled);
+});
+
+test('a second move-to-position interrupts the first, stops the pathfinder and reports the interruption', async (t) => {
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const stopStub = sinon.stub();
+  let releaseFirstGoto: (() => void) | null = null;
+  const gotoStub = sinon.stub();
+  gotoStub.onCall(0).returns(new Promise((resolve, reject) => {
+    releaseFirstGoto = () => reject(new Error('Path was stopped before it could be completed'));
+  }));
+  gotoStub.onCall(1).resolves();
+
+  const mockBot = {
+    pathfinder: {
+      goto: gotoStub,
+      stop: stopStub.callsFake(() => releaseFirstGoto?.())
+    }
+  } as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerPositionTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
+  const executor = moveToPositionCall!.args[3];
+
+  const firstResultPromise = executor({ x: 1, y: 2, z: 3 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const secondResultPromise = executor({ x: 4, y: 5, z: 6 });
+
+  const [firstResult, secondResult] = await Promise.all([firstResultPromise, secondResultPromise]);
+
+  t.true((mockBot.pathfinder!.stop as sinon.SinonStub).calledOnce);
+  t.true(firstResult.isError);
+  t.falsy(secondResult.isError);
+  t.true(secondResult.content[0].text.includes('Successfully moved'));
+});
+
+test.serial('move-in-direction sets and clears the control state after the full duration', async (t) => {
+  const clock = sinon.useFakeTimers();
+  t.teardown(() => clock.restore());
+
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const setControlState = sinon.stub();
+  const mockBot = { setControlState } as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerPositionTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const moveInDirectionCall = toolCalls.find(call => call.args[0] === 'move-in-direction');
+  const executor = moveInDirectionCall!.args[3];
+
+  const resultPromise = executor({ direction: 'forward', duration: 500 });
+  await clock.tickAsync(500);
+  const result = await resultPromise;
+
+  t.falsy(result.isError);
+  t.true(result.content[0].text.includes('Moved forward for 500ms'));
+  t.true(setControlState.calledWith('forward', true));
+  t.true(setControlState.calledWith('forward', false));
+  t.true(setControlState.lastCall.calledWith('forward', false));
+});
+
+test('a new action interrupts move-in-direction and clears the control state early', async (t) => {
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const setControlState = sinon.stub();
+  const mockBot = {
+    setControlState,
+    pathfinder: {
+      goto: sinon.stub().resolves(),
+      stop: sinon.stub()
+    }
+  } as unknown as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerPositionTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const moveInDirectionCall = toolCalls.find(call => call.args[0] === 'move-in-direction');
+  const moveToPositionCall = toolCalls.find(call => call.args[0] === 'move-to-position');
+  const moveInDirectionExecutor = moveInDirectionCall!.args[3];
+  const moveToPositionExecutor = moveToPositionCall!.args[3];
+
+  const firstResultPromise = moveInDirectionExecutor({ direction: 'forward', duration: 60000 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const secondResultPromise = moveToPositionExecutor({ x: 1, y: 2, z: 3 });
+  const [firstResult, secondResult] = await Promise.all([firstResultPromise, secondResultPromise]);
+
+  t.true(firstResult.isError);
+  t.true(firstResult.content[0].text.includes('Stopped moving forward'));
+  t.true(setControlState.calledWith('forward', false));
+  t.falsy(secondResult.isError);
 });

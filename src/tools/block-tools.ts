@@ -7,16 +7,25 @@ import minecraftData from 'minecraft-data';
 import { ToolFactory } from '../tool-factory.js';
 import { log } from '../logger.js';
 import { coerceCoordinates } from './coordinate-utils.js';
+import { ActionManager, ActionResult, raceWithAbort } from '../action-manager.js';
 
 type FaceDirection = 'up' | 'down' | 'north' | 'south' | 'east' | 'west';
 const MAX_FIND_BLOCKS_COUNT = 256;
+const BLOCK_ACTION_TIMEOUT_MS = 30000;
+
+function respondToAction(factory: ToolFactory, result: ActionResult) {
+  if (result.interrupted) {
+    return { content: [{ type: 'text' as const, text: `Interrupted: ${result.message}` }], isError: true };
+  }
+  return result.success ? factory.createResponse(result.message) : factory.createErrorResponse(result.message);
+}
 
 interface FaceOption {
   direction: string;
   vector: Vec3;
 }
 
-export function registerBlockTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
+export function registerBlockTools(factory: ToolFactory, getBot: () => mineflayer.Bot, actionManager: ActionManager): void {
   factory.registerTool(
     "place-block",
     "Place a block at the specified position",
@@ -60,29 +69,37 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
         }
       }
 
-      for (const face of possibleFaces) {
-        const referencePos = placePos.plus(face.vector);
-        const referenceBlock = bot.blockAt(referencePos);
-
-        if (referenceBlock && referenceBlock.name !== 'air') {
-          if (!bot.canSeeBlock(referenceBlock)) {
-            const goal = new goals.GoalNear(referencePos.x, referencePos.y, referencePos.z, 2);
-            await bot.pathfinder.goto(goal);
+      const result = await actionManager.run("place-block", BLOCK_ACTION_TIMEOUT_MS, async (ctx) => {
+        for (const face of possibleFaces) {
+          if (ctx.signal.aborted) {
+            throw new Error(`Interrupted while placing block at (${x}, ${y}, ${z})`);
           }
 
-          await bot.lookAt(placePos, true);
+          const referencePos = placePos.plus(face.vector);
+          const referenceBlock = bot.blockAt(referencePos);
 
-          try {
-            await bot.placeBlock(referenceBlock, face.vector.scaled(-1));
-            return factory.createResponse(`Placed block at (${x}, ${y}, ${z}) using ${face.direction} face`);
-          } catch (placeError) {
-            log('warn', `Failed to place using ${face.direction} face: ${placeError}`);
-            continue;
+          if (referenceBlock && referenceBlock.name !== 'air') {
+            if (!bot.canSeeBlock(referenceBlock)) {
+              const goal = new goals.GoalNear(referencePos.x, referencePos.y, referencePos.z, 2);
+              await raceWithAbort(bot.pathfinder.goto(goal), ctx.signal, () => bot.pathfinder.stop());
+            }
+
+            await bot.lookAt(placePos, true);
+
+            try {
+              await bot.placeBlock(referenceBlock, face.vector.scaled(-1));
+              return `Placed block at (${x}, ${y}, ${z}) using ${face.direction} face`;
+            } catch (placeError) {
+              log('warn', `Failed to place using ${face.direction} face: ${placeError}`);
+              continue;
+            }
           }
         }
-      }
 
-      return factory.createResponse(`Failed to place block at (${x}, ${y}, ${z}): No suitable reference block found`);
+        return `Failed to place block at (${x}, ${y}, ${z}): No suitable reference block found`;
+      });
+
+      return respondToAction(factory, result);
     }
   );
 
@@ -105,13 +122,21 @@ export function registerBlockTools(factory: ToolFactory, getBot: () => mineflaye
         return factory.createResponse(`No block found at position (${x}, ${y}, ${z})`);
       }
 
-      if (!bot.canDigBlock(block) || !bot.canSeeBlock(block)) {
-        const goal = new goals.GoalNear(x, y, z, 2);
-        await bot.pathfinder.goto(goal);
-      }
+      const result = await actionManager.run("dig-block", BLOCK_ACTION_TIMEOUT_MS, async (ctx) => {
+        if (!bot.canDigBlock(block) || !bot.canSeeBlock(block)) {
+          const goal = new goals.GoalNear(x, y, z, 2);
+          await raceWithAbort(bot.pathfinder.goto(goal), ctx.signal, () => bot.pathfinder.stop());
+        }
 
-      await bot.dig(block);
-      return factory.createResponse(`Dug ${block.name} at (${x}, ${y}, ${z})`);
+        if (ctx.signal.aborted) {
+          throw new Error(`Interrupted before digging ${block.name} at (${x}, ${y}, ${z})`);
+        }
+
+        await bot.dig(block);
+        return `Dug ${block.name} at (${x}, ${y}, ${z})`;
+      });
+
+      return respondToAction(factory, result);
     }
   );
 

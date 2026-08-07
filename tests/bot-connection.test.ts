@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import mineflayer from 'mineflayer';
 import minecraftData from 'minecraft-data';
 import { BotConnection } from '../src/bot-connection.js';
+import { WebViewer } from '../src/web-viewer.js';
 
 function makeFakeBot(): mineflayer.Bot {
   const bot = new EventEmitter() as unknown as mineflayer.Bot & { quit: sinon.SinonStub };
@@ -432,5 +433,60 @@ test.serial('connectTo does not accumulate listeners across repeated connect/dis
     );
   } finally {
     createBot.restore();
+  }
+});
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('waitFor timed out');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+test.serial('web viewer follows the bot through connect, swap and disconnect without leaking', async (t) => {
+  const config = { host: 'localhost', port: 25565, username: 'TestBot' };
+  const callbacks = { onLog: sinon.stub(), onChatMessage: sinon.stub() };
+  const connection = new BotConnection(config, callbacks);
+
+  // Attach only sets bot.viewer.close; the real prismarine-viewer server is never started.
+  const attach = sinon.stub().callsFake((bot: mineflayer.Bot) => {
+    (bot as unknown as { viewer: { close: sinon.SinonStub } }).viewer = { close: sinon.stub() };
+  });
+  const webViewer = new WebViewer({ port: 0, attach });
+  await webViewer.start(null);
+  (connection as unknown as { webViewer: WebViewer }).webViewer = webViewer;
+
+  const bots: (mineflayer.Bot & { quit: sinon.SinonStub })[] = [];
+  const createBot = sinon.stub(mineflayer, 'createBot').callsFake(() => {
+    const bot = makeFakeBot() as mineflayer.Bot & { quit: sinon.SinonStub };
+    bots.push(bot);
+    return bot;
+  });
+
+  try {
+    const p1 = connection.connectTo({ host: 'a.example.com', port: 25565, username: 'TestBot' });
+    bots[0].emit('spawn');
+    await p1;
+    await waitFor(() => attach.calledOnce);
+    const viewerA = (bots[0] as unknown as { viewer: { close: sinon.SinonStub } }).viewer;
+    t.false(viewerA.close.called);
+
+    const p2 = connection.connectTo({ host: 'b.example.com', port: 25565, username: 'TestBot' });
+    bots[1].emit('spawn');
+    await p2;
+    await waitFor(() => attach.calledTwice);
+    const viewerB = (bots[1] as unknown as { viewer: { close: sinon.SinonStub } }).viewer;
+    t.true(viewerA.close.calledOnce, 'swap must close the previous bot viewer exactly once');
+
+    connection.disconnect();
+    t.true(viewerB.close.calledOnce, 'disconnect must close the current bot viewer');
+
+    t.true(attach.calledTwice, 'no extra attach beyond the two real bots');
+  } finally {
+    createBot.restore();
+    webViewer.stop();
   }
 });

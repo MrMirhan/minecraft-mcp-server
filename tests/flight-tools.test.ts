@@ -1,6 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { registerFlightTools } from '../src/tools/flight-tools.js';
+import { ActionManager } from '../src/action-manager.js';
 import { ToolFactory } from '../src/tool-factory.js';
 import { BotConnection } from '../src/bot-connection.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -18,7 +19,8 @@ test('registerFlightTools registers fly-to tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerFlightTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerFlightTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const flyToCall = toolCalls.find(call => call.args[0] === 'fly-to');
@@ -49,7 +51,8 @@ test('fly-to successfully flies to destination', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerFlightTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerFlightTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const flyToCall = toolCalls.find(call => call.args[0] === 'fly-to');
@@ -77,7 +80,8 @@ test('fly-to returns error when creative mode not available', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerFlightTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerFlightTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const flyToCall = toolCalls.find(call => call.args[0] === 'fly-to');
@@ -110,7 +114,8 @@ test('fly-to handles flight errors', async (t) => {
   } as unknown as mineflayer.Bot;
   const getBot = () => mockBot;
 
-  registerFlightTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerFlightTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const flyToCall = toolCalls.find(call => call.args[0] === 'fly-to');

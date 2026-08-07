@@ -4,10 +4,11 @@ import type { Item } from 'prismarine-item';
 import { Vec3 } from 'vec3';
 import { ToolFactory } from '../tool-factory.js';
 import { coerceCoordinates } from './coordinate-utils.js';
+import { ActionContext, ActionManager, raceWithAbort } from '../action-manager.js';
 
 const FURNACE_BLOCKS = new Set(['furnace', 'blast_furnace', 'smoker']);
 
-export function registerFurnaceTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
+export function registerFurnaceTools(factory: ToolFactory, getBot: () => mineflayer.Bot, actionManager: ActionManager): void {
   factory.registerTool(
     "smelt-item",
     "Smelt items using a furnace-like block",
@@ -68,59 +69,68 @@ export function registerFurnaceTools(factory: ToolFactory, getBot: () => minefla
       const resolvedInputCount = Math.min(inputCount, input.count);
       const resolvedFuelCount = Math.min(fuelCount, fuel.count);
 
-      const furnace = await bot.openFurnace(furnaceBlock);
-      const cleanup = () => {
+      const result = await actionManager.run("smelt-item", timeoutMs, async (ctx) => {
+        // These awaits can hang indefinitely (an unreachable furnace never sends its window,
+        // a laggy server never acks the slot click). raceWithAbort frees this caller on abort,
+        // but cannot cancel mineflayer's own pending promise; it keeps running detached and
+        // its eventual result is discarded (see ActionManager.run).
+        const furnace = await raceWithAbort(bot.openFurnace(furnaceBlock), ctx.signal, () => undefined);
+        const cleanup = () => {
+          try {
+            furnace.close();
+          } catch {
+            // ignore
+          }
+        };
+
         try {
-          furnace.close();
-        } catch {
-          // ignore
+          const existingInput = furnace.inputItem();
+          if (existingInput && existingInput.name !== input.name) {
+            return `Furnace input slot is occupied by ${existingInput.name}`;
+          }
+
+          const existingFuel = furnace.fuelItem();
+          if (existingFuel && existingFuel.name !== fuel.name) {
+            return `Furnace fuel slot is occupied by ${existingFuel.name}`;
+          }
+
+          await raceWithAbort(furnace.putFuel(fuel.type, fuel.metadata ?? null, resolvedFuelCount), ctx.signal, () => undefined);
+          await raceWithAbort(furnace.putInput(input.type, input.metadata ?? null, resolvedInputCount), ctx.signal, () => undefined);
+
+          if (!takeOutput) {
+            return `Started smelting ${resolvedInputCount} ${input.name} with ${resolvedFuelCount} ${fuel.name}`;
+          }
+
+          try {
+            await waitForOutput(furnace, ctx);
+            const taken = await furnace.takeOutput();
+            return `Smelted ${taken.count} ${taken.name}`;
+          } catch {
+            return `No output after ${timeoutMs}ms (loaded ${resolvedInputCount} ${input.name} and ${resolvedFuelCount} ${fuel.name} into the furnace)`;
+          }
+        } finally {
+          cleanup();
         }
-      };
+      });
 
-      try {
-        const existingInput = furnace.inputItem();
-        if (existingInput && existingInput.name !== input.name) {
-          return factory.createResponse(`Furnace input slot is occupied by ${existingInput.name}`);
-        }
-
-        const existingFuel = furnace.fuelItem();
-        if (existingFuel && existingFuel.name !== fuel.name) {
-          return factory.createResponse(`Furnace fuel slot is occupied by ${existingFuel.name}`);
-        }
-
-        await furnace.putFuel(fuel.type, fuel.metadata ?? null, resolvedFuelCount);
-        await furnace.putInput(input.type, input.metadata ?? null, resolvedInputCount);
-
-        if (!takeOutput) {
-          return factory.createResponse(
-            `Started smelting ${resolvedInputCount} ${input.name} with ${resolvedFuelCount} ${fuel.name}`
-          );
-        }
-
-        const output = await waitForOutput(furnace, timeoutMs);
-        if (!output) {
-          return factory.createResponse(`No output after ${timeoutMs}ms`);
-        }
-
-        const taken = await furnace.takeOutput();
-        return factory.createResponse(`Smelted ${taken.count} ${taken.name}`);
-      } finally {
-        cleanup();
-      }
+      return result.success ? factory.createResponse(result.message) : factory.createErrorResponse(result.message);
     }
   );
 }
 
-async function waitForOutput(furnace: mineflayer.Furnace, timeoutMs: number): Promise<Item | null> {
+function waitForOutput(furnace: mineflayer.Furnace, ctx: ActionContext): Promise<Item> {
   const existing = furnace.outputItem();
   if (existing) {
-    return existing;
+    return Promise.resolve(existing);
   }
 
-  return new Promise((resolve) => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return new Promise<Item>((resolve, reject) => {
+    const cleanup = (): void => {
+      furnace.removeListener('update', onUpdate);
+      ctx.signal.removeEventListener('abort', onAbort);
+    };
 
-    const onUpdate = () => {
+    const onUpdate = (): void => {
       const output = furnace.outputItem();
       if (output) {
         cleanup();
@@ -128,18 +138,12 @@ async function waitForOutput(furnace: mineflayer.Furnace, timeoutMs: number): Pr
       }
     };
 
-    const cleanup = () => {
-      furnace.removeListener('update', onUpdate);
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+    const onAbort = (): void => {
+      cleanup();
+      reject(ctx.signal.reason instanceof Error ? ctx.signal.reason : new Error('Smelting interrupted'));
     };
 
     furnace.on('update', onUpdate);
-
-    timeoutId = setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, timeoutMs);
+    ctx.signal.addEventListener('abort', onAbort, { once: true });
   });
 }

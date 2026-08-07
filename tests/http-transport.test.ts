@@ -65,7 +65,7 @@ test.serial('POST /mcp initialize without auth returns 401', async (t) => {
   t.is(res.status, 401);
 });
 
-test.serial('POST /mcp initialize with bearer token succeeds and lists 25 tools', async (t) => {
+test.serial('POST /mcp initialize with bearer token succeeds and lists all tools', async (t) => {
   const { baseUrl, close } = await startServer(AUTH_TOKEN);
   t.teardown(close);
 
@@ -101,12 +101,34 @@ test.serial('POST /mcp initialize with bearer token succeeds and lists 25 tools'
   t.is(listRes.status, 200);
   const listBody = parseSsePayload(await listRes.text());
   const tools = (listBody as { result: { tools: { name: string }[] } }).result.tools;
-  t.is(tools.length, 25);
+  t.is(tools.length, 44);
 
   const names = tools.map((tool) => tool.name);
   t.true(names.includes('connect-to-server'));
   t.true(names.includes('disconnect'));
   t.true(names.includes('get-connection-status'));
+});
+
+test.serial('initialize returns server instructions', async (t) => {
+  const { baseUrl, close } = await startServer(AUTH_TOKEN);
+  t.teardown(close);
+
+  const res = await fetch(baseUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: ACCEPT,
+      Authorization: `Bearer ${AUTH_TOKEN}`
+    },
+    body: JSON.stringify(INIT_REQUEST)
+  });
+
+  const body = parseSsePayload(await res.text()) as { result: { instructions?: string } };
+  const instructions = body.result.instructions;
+
+  t.truthy(instructions);
+  t.true(instructions!.includes('get-status'));
+  t.true(instructions!.includes('does not see the client'));
 });
 
 test.serial('POST /mcp with unknown session ID returns 400', async (t) => {

@@ -120,6 +120,60 @@ Once connected to a Minecraft server, Claude can use these commands:
 ### Game State
 - `detect-gamemode` - Detect the gamemode on game
 
+### Crafting
+- `list-recipes` - List recipes the bot can craft with the current inventory. Optional `outputItem` filters by name.
+- `craft-item` - Craft an item. Takes `outputItem`, and an optional `amount` (default: 1).
+- `get-recipe` - Get recipe details for an item. Takes `itemName`.
+- `can-craft` - Check whether the bot can craft an item with the current inventory. Takes `itemName`.
+
+### Connection
+These tools manage the connection itself. They work even when the bot is not connected.
+- `connect-to-server` - Connect to a Minecraft server, switching from any current connection. Takes `host`, and optional `port`, `username`, `version`.
+- `disconnect` - Disconnect from the current Minecraft server.
+- `get-connection-status` - Get the connection state, host, port, username, and Minecraft version.
+
+### UI State
+- `read-scoreboard` - Read the sidebar, list, and below-name scoreboards.
+- `read-window` - Read the open GUI window's items: name, count, lore, and CustomModelData.
+- `read-tablist` - Read the tab list header and footer.
+- `read-bossbar` - Read all active boss bars: title, color, and progress.
+- `read-title` - Read the most recent title, subtitle, and action bar text.
+- `read-teams` - Read all scoreboard teams, with color, prefix, suffix, and members.
+- `get-resource-pack` - Get the resource pack URL and hash sent by the server, if any.
+
+### Rendering
+- `take-screenshot` - Render the bot's surroundings as a PNG image. Optional `width`, `height`, and `firstPerson`.
+- `render-window` - Render the open inventory or container window as a PNG image styled after the Minecraft GUI.
+
+### Status
+- `get-status` - Get one summary: position, vitals, environment, held item, inventory, and nearby players.
+
+### Automation
+- `collect-blocks` - Find, path to, and mine blocks of one type. Takes `blockType`, and optional `count`, `maxDistance`, `timeoutMs`.
+- `goto-player` - Path to a named player and stop nearby. Takes `username`, and optional `stopDistance`, `timeoutMs`.
+- `follow-player` - Follow a named player until the timeout ends or the player leaves range. Takes `username`, and optional `stopDistance`, `timeoutMs`.
+- `scan-area` - Summarize nearby block types, notable blocks, entities, and players. Optional `radius`, `timeoutMs`.
+
+### Control
+- `stop` - Stop the action the bot is running now.
+- `get-current-action` - Get the action the bot is running now, and its running time.
+
+### Web Viewer
+These tools manage the live web viewer. They work even when the bot is not connected.
+- `start-viewer` - Start the live web viewer and return its URL.
+- `stop-viewer` - Stop the live web viewer.
+- `get-viewer-url` - Get the live web viewer's URL, if it is running.
+
+## Live Web Viewer
+
+The live web viewer shows the bot's 3D world in a browser. It overlays the scoreboard, boss bars, the title and action bar, the tab list, and the open window.
+
+Start the viewer with the `start-viewer` tool. It returns a URL such as `http://localhost:3007/`. Stop it with `stop-viewer`. Check its address with `get-viewer-url`.
+
+The viewer attaches to whatever bot is currently connected. It reattaches after `connect-to-server` runs. If the bot disconnects, the viewer shows an empty view.
+
+Set `WEB_VIEWER_PORT` to change the port (default: `3007`). See [GUIDE.md](GUIDE.md) for a known limit on reverse-proxy setups.
+
 ## Running with Docker
 
 The server can also run over an HTTP transport (MCP Streamable HTTP) inside a container, which is useful for remote/hosted setups. stdio mode remains the default for local Claude Desktop usage (`node dist/main.js`).
@@ -133,6 +187,8 @@ docker run --rm -p 3000:3000 \
 ```
 
 The MCP endpoint is then served at `http://HOST:3000/mcp` and protected by the bearer token. `MC_HOST` is left empty by default, so the server starts idle and the agent joins a Minecraft server at runtime via the `connect-to-server` tool.
+
+Two more variables control optional features. `CHROMIUM_PATH` sets the browser used by `take-screenshot` (default: `/usr/bin/chromium`, already set in this image). `WEB_VIEWER_PORT` sets the port for the live web viewer (default: `3007`).
 
 Point an MCP client that supports the Streamable HTTP URL transport at the endpoint, sending the token as an `Authorization` header:
 

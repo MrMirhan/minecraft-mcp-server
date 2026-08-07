@@ -1,6 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { registerBlockTools } from '../src/tools/block-tools.js';
+import { ActionManager } from '../src/action-manager.js';
 import { ToolFactory } from '../src/tool-factory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { BotConnection } from '../src/bot-connection.js';
@@ -18,7 +19,8 @@ test('registerBlockTools registers place-block tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const placeBlockCall = toolCalls.find(call => call.args[0] === 'place-block');
@@ -38,7 +40,8 @@ test('registerBlockTools registers dig-block tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const digBlockCall = toolCalls.find(call => call.args[0] === 'dig-block');
@@ -58,7 +61,8 @@ test('registerBlockTools registers get-block-info tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getBlockInfoCall = toolCalls.find(call => call.args[0] === 'get-block-info');
@@ -78,7 +82,8 @@ test('registerBlockTools registers find-blocks tool', (t) => {
   const mockBot = {} as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const findBlockCall = toolCalls.find(call => call.args[0] === 'find-blocks');
@@ -106,7 +111,8 @@ test('get-block-info returns block information', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getBlockInfoCall = toolCalls.find(call => call.args[0] === 'get-block-info');
@@ -134,7 +140,8 @@ test('get-block-info handles missing block', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const getBlockInfoCall = toolCalls.find(call => call.args[0] === 'get-block-info');
@@ -162,7 +169,8 @@ test('dig-block handles air blocks', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const digBlockCall = toolCalls.find(call => call.args[0] === 'dig-block');
@@ -188,7 +196,8 @@ test('place-block blocks placing at bot position and one block above', async (t)
   } as unknown as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const placeBlockCall = toolCalls.find(call => call.args[0] === 'place-block');
@@ -216,7 +225,8 @@ test('place-block floors input coordinates before self-placement guard', async (
   } as unknown as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const placeBlockCall = toolCalls.find(call => call.args[0] === 'place-block');
@@ -242,7 +252,8 @@ test('find-blocks returns not found when block not found', async (t) => {
   } as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const findBlockCall = toolCalls.find(call => call.args[0] === 'find-blocks');
@@ -269,7 +280,8 @@ test('find-blocks returns multiple results when count is greater than one', asyn
   } as unknown as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const findBlockCall = toolCalls.find(call => call.args[0] === 'find-blocks');
@@ -299,7 +311,8 @@ test('find-blocks clamps oversized count before calling bot.findBlocks', async (
   } as unknown as Partial<mineflayer.Bot>;
   const getBot = () => mockBot as mineflayer.Bot;
 
-  registerBlockTools(factory, getBot);
+  const actionManager = new ActionManager();
+  registerBlockTools(factory, getBot, actionManager);
 
   const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
   const findBlockCall = toolCalls.find(call => call.args[0] === 'find-blocks');
@@ -309,4 +322,120 @@ test('find-blocks clamps oversized count before calling bot.findBlocks', async (
 
   const findBlocksArgs = findBlocksStub.firstCall.args[0];
   t.is(findBlocksArgs.count, 256);
+});
+
+test('dig-block paths to an unreachable block before digging it', async (t) => {
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const gotoStub = sinon.stub().resolves();
+  const digStub = sinon.stub().resolves();
+  const mockBlock = { name: 'stone' };
+  const mockBot = {
+    blockAt: sinon.stub().returns(mockBlock),
+    canDigBlock: sinon.stub().returns(false),
+    canSeeBlock: sinon.stub().returns(false),
+    pathfinder: { goto: gotoStub, stop: sinon.stub() },
+    dig: digStub
+  } as unknown as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerBlockTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const digBlockCall = toolCalls.find(call => call.args[0] === 'dig-block');
+  const executor = digBlockCall!.args[3];
+
+  const result = await executor({ x: 10, y: 64, z: 20 });
+
+  t.falsy(result.isError);
+  t.true(result.content[0].text.includes('Dug stone at (10, 64, 20)'));
+  t.true(gotoStub.calledOnce);
+  t.true(digStub.calledOnceWith(mockBlock));
+});
+
+test('a second dig-block interrupts the first, stops the pathfinder and reports the interruption', async (t) => {
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const stopStub = sinon.stub();
+  let releaseFirstGoto: (() => void) | null = null;
+  const gotoStub = sinon.stub();
+  gotoStub.onCall(0).returns(new Promise((resolve, reject) => {
+    releaseFirstGoto = () => reject(new Error('stopped'));
+  }));
+  gotoStub.onCall(1).resolves();
+
+  const mockBot = {
+    blockAt: sinon.stub().returns({ name: 'stone' }),
+    canDigBlock: sinon.stub().returns(false),
+    canSeeBlock: sinon.stub().returns(false),
+    pathfinder: { goto: gotoStub, stop: stopStub.callsFake(() => releaseFirstGoto?.()) },
+    dig: sinon.stub().resolves()
+  } as unknown as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerBlockTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const digBlockCall = toolCalls.find(call => call.args[0] === 'dig-block');
+  const executor = digBlockCall!.args[3];
+
+  const firstResultPromise = executor({ x: 10, y: 64, z: 20 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const secondResultPromise = executor({ x: 11, y: 64, z: 21 });
+  const [firstResult, secondResult] = await Promise.all([firstResultPromise, secondResultPromise]);
+
+  t.true(stopStub.calledOnce);
+  t.true(firstResult.isError);
+  t.falsy(secondResult.isError);
+  t.true(secondResult.content[0].text.includes('Dug stone'));
+});
+
+test('place-block places against a visible reference block without pathfinding', async (t) => {
+  const mockServer = {
+    tool: sinon.stub()
+  } as unknown as McpServer;
+  const mockConnection = {
+    checkConnectionAndReconnect: sinon.stub().resolves({ connected: true })
+  } as unknown as BotConnection;
+  const factory = new ToolFactory(mockServer, mockConnection);
+
+  const placeBlockStub = sinon.stub().resolves();
+  const referenceBlock = { name: 'dirt' };
+  const mockBot = {
+    entity: { position: new Vec3(0, 64, 0) },
+    blockAt: sinon.stub().callsFake((pos: Vec3) => (pos.y === 63 ? referenceBlock : { name: 'air' })),
+    canSeeBlock: sinon.stub().returns(true),
+    lookAt: sinon.stub().resolves(),
+    placeBlock: placeBlockStub,
+    pathfinder: { goto: sinon.stub().resolves(), stop: sinon.stub() }
+  } as unknown as Partial<mineflayer.Bot>;
+  const getBot = () => mockBot as mineflayer.Bot;
+  const actionManager = new ActionManager();
+
+  registerBlockTools(factory, getBot, actionManager);
+
+  const toolCalls = (mockServer.tool as sinon.SinonStub).getCalls();
+  const placeBlockCall = toolCalls.find(call => call.args[0] === 'place-block');
+  const executor = placeBlockCall!.args[3];
+
+  const result = await executor({ x: 5, y: 64, z: 5 });
+
+  t.falsy(result.isError);
+  t.true(result.content[0].text.includes('Placed block at (5, 64, 5) using down face'));
+  t.true(placeBlockStub.calledOnceWith(referenceBlock));
 });

@@ -3,36 +3,18 @@ import mineflayer from 'mineflayer';
 import { Vec3 } from 'vec3';
 import { ToolFactory } from '../tool-factory.js';
 import { coerceCoordinates } from './coordinate-utils.js';
+import { ActionManager, ActionResult, raceWithAbort } from '../action-manager.js';
 
-function createCancellableFlightOperation(
-  bot: mineflayer.Bot,
-  destination: Vec3,
-  controller: AbortController
-): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    let aborted = false;
+const FLIGHT_TIMEOUT_MS = 20000;
 
-    controller.signal.addEventListener('abort', () => {
-      aborted = true;
-      bot.creative.stopFlying();
-      reject(new Error("Flight operation cancelled"));
-    });
-
-    bot.creative.flyTo(destination)
-      .then(() => {
-        if (!aborted) {
-          resolve(true);
-        }
-      })
-      .catch((err: Error) => {
-        if (!aborted) {
-          reject(err);
-        }
-      });
-  });
+function respondToAction(factory: ToolFactory, result: ActionResult) {
+  if (result.interrupted) {
+    return { content: [{ type: 'text' as const, text: `Interrupted: ${result.message}` }], isError: true };
+  }
+  return result.success ? factory.createResponse(result.message) : factory.createErrorResponse(result.message);
 }
 
-export function registerFlightTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
+export function registerFlightTools(factory: ToolFactory, getBot: () => mineflayer.Bot, actionManager: ActionManager): void {
   factory.registerTool(
     "fly-to",
     "Make the bot fly to a specific position",
@@ -50,32 +32,26 @@ export function registerFlightTools(factory: ToolFactory, getBot: () => mineflay
         return factory.createResponse("Creative mode is not available. Cannot fly.");
       }
 
-      const controller = new AbortController();
-      const FLIGHT_TIMEOUT_MS = 20000;
+      const destination = new Vec3(x, y, z);
 
-      const timeoutId = setTimeout(() => {
-        if (!controller.signal.aborted) {
-          controller.abort();
+      const result = await actionManager.run("fly-to", FLIGHT_TIMEOUT_MS, async (ctx) => {
+        try {
+          await raceWithAbort(bot.creative.flyTo(destination), ctx.signal, () => bot.creative.stopFlying());
+          return `Successfully flew to position (${x}, ${y}, ${z}).`;
+        } finally {
+          bot.creative.stopFlying();
         }
-      }, FLIGHT_TIMEOUT_MS);
+      });
 
-      try {
-        const destination = new Vec3(x, y, z);
-        await createCancellableFlightOperation(bot, destination, controller);
-        return factory.createResponse(`Successfully flew to position (${x}, ${y}, ${z}).`);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          const currentPosAfterTimeout = bot.entity.position;
-          return factory.createErrorResponse(
-            `Flight timed out after ${FLIGHT_TIMEOUT_MS / 1000} seconds. The destination may be unreachable. ` +
-            `Current position: (${Math.floor(currentPosAfterTimeout.x)}, ${Math.floor(currentPosAfterTimeout.y)}, ${Math.floor(currentPosAfterTimeout.z)})`
-          );
-        }
-        throw error;
-      } finally {
-        clearTimeout(timeoutId);
-        bot.creative.stopFlying();
+      if (result.timedout) {
+        const currentPosAfterTimeout = bot.entity.position;
+        return factory.createErrorResponse(
+          `Flight timed out after ${FLIGHT_TIMEOUT_MS / 1000} seconds. The destination may be unreachable. ` +
+          `Current position: (${Math.floor(currentPosAfterTimeout.x)}, ${Math.floor(currentPosAfterTimeout.y)}, ${Math.floor(currentPosAfterTimeout.z)})`
+        );
       }
+
+      return respondToAction(factory, result);
     }
   );
 }

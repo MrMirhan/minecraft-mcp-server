@@ -5,10 +5,18 @@ const { goals } = pathfinderPkg;
 import { Vec3 } from 'vec3';
 import { ToolFactory } from '../tool-factory.js';
 import { coerceCoordinates } from './coordinate-utils.js';
+import { ActionManager, ActionResult, raceWithAbort } from '../action-manager.js';
 
 type Direction = 'forward' | 'back' | 'left' | 'right';
 
-export function registerPositionTools(factory: ToolFactory, getBot: () => mineflayer.Bot): void {
+function respondToAction(factory: ToolFactory, result: ActionResult) {
+  if (result.interrupted) {
+    return { content: [{ type: 'text' as const, text: `Interrupted: ${result.message}` }], isError: true };
+  }
+  return result.success ? factory.createResponse(result.message) : factory.createErrorResponse(result.message);
+}
+
+export function registerPositionTools(factory: ToolFactory, getBot: () => mineflayer.Bot, actionManager: ActionManager): void {
   factory.registerTool(
     "get-position",
     "Get the current position of the bot",
@@ -40,42 +48,17 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
 
       const bot = getBot();
       const goal = new goals.GoalNear(x, y, z, range);
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      let timeoutPromise: Promise<never> | null = null;
-      let timedOut = false;
 
-      if (timeoutMs !== undefined) {
-        timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => {
-            timedOut = true;
-            reject(new Error(`Move timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        });
+      const result = await actionManager.run("move-to-position", timeoutMs, async (ctx) => {
+        const gotoPromise = bot.pathfinder.goto(goal);
+        await raceWithAbort(gotoPromise, ctx.signal, () => bot.pathfinder.stop());
+        return `Successfully moved to position near (${x}, ${y}, ${z})`;
+      });
+
+      if (result.timedout) {
+        return factory.createErrorResponse(`Move timed out after ${timeoutMs}ms`);
       }
-
-      const gotoPromise = bot.pathfinder.goto(goal);
-
-      try {
-        if (timeoutPromise) {
-          await Promise.race([gotoPromise, timeoutPromise]);
-        } else {
-          await gotoPromise;
-        }
-        return factory.createResponse(`Successfully moved to position near (${x}, ${y}, ${z})`);
-      } catch (error) {
-        if (timedOut) {
-          throw new Error(`Move timed out after ${timeoutMs}ms`, { cause: error });
-        }
-        throw error;
-      } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-        }
-        if (timedOut) {
-          bot.pathfinder.stop();
-          gotoPromise.catch(() => {});
-        }
-      }
+      return respondToAction(factory, result);
     }
   );
 
@@ -117,13 +100,27 @@ export function registerPositionTools(factory: ToolFactory, getBot: () => minefl
     },
     async ({ direction, duration = 1000 }: { direction: Direction, duration?: number }) => {
       const bot = getBot();
-      return new Promise((resolve) => {
-        bot.setControlState(direction, true);
-        setTimeout(() => {
-          bot.setControlState(direction, false);
-          resolve(factory.createResponse(`Moved ${direction} for ${duration}ms`));
-        }, duration);
+
+      const result = await actionManager.run(`move-in-direction:${direction}`, undefined, async (ctx) => {
+        return new Promise<string>((resolve) => {
+          const startedAt = Date.now();
+          bot.setControlState(direction, true);
+
+          const finish = (message: string): void => {
+            bot.setControlState(direction, false);
+            clearTimeout(timer);
+            ctx.signal.removeEventListener('abort', onAbort);
+            resolve(message);
+          };
+
+          const onAbort = (): void => finish(`Stopped moving ${direction} after ${Date.now() - startedAt}ms`);
+          ctx.signal.addEventListener('abort', onAbort, { once: true });
+
+          const timer = setTimeout(() => finish(`Moved ${direction} for ${duration}ms`), duration);
+        });
       });
+
+      return respondToAction(factory, result);
     }
   );
 }
