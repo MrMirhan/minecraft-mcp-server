@@ -4,6 +4,25 @@ import { ToolFactory } from '../tool-factory.js';
 // first tool call (the server sends the resource pack at join time) are not missed.
 import { getUiState } from '../web-viewer.js';
 
+// mineflayer's ScoreBoard.setTitle only unwraps a JSON string title. On 1.21.x the title
+// arrives as a component object, which falls through as-is and stringifies to [object Object].
+function chatToMotd(value: unknown): string {
+  if (typeof value === 'string') {
+    return extractText(value);
+  }
+  if (value && typeof value === 'object') {
+    const maybeChat = value as { toMotd?: () => string; text?: unknown };
+    if (typeof maybeChat.toMotd === 'function') {
+      return maybeChat.toMotd();
+    }
+    if (typeof maybeChat.text === 'string') {
+      return maybeChat.text;
+    }
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 function extractText(raw: string): string {
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -47,9 +66,10 @@ export function registerUiTools(factory: ToolFactory, getBot: () => mineflayer.B
 
       let output = '';
       for (const { label, scoreboard } of active) {
-        output += `${label}: ${scoreboard.title}\n`;
+        output += `${label}: ${chatToMotd(scoreboard.title)}\n`;
         for (const item of scoreboard.items) {
-          output += `  ${item.name}: ${item.value}\n`;
+          const line = item.displayName ? item.displayName.toMotd() : item.name;
+          output += `  ${line}: ${item.value}\n`;
         }
       }
 

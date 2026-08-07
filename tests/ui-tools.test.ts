@@ -74,6 +74,28 @@ test('read-scoreboard returns titles and items for active positions', async (t) 
   t.true(result.content[0].text.includes('§cBob: 10'));
 });
 
+test('read-scoreboard renders a component title instead of [object Object]', async (t) => {
+  const { factory, mockServer } = makeFactory();
+  const mockBot = {
+    scoreboard: {
+      sidebar: {
+        // 1.21.x delivers the title as a component object, not a JSON string
+        title: { toMotd: () => '§6CraftRune' },
+        items: [
+          { name: 'raw_name', displayName: { toMotd: () => '§bKills' }, value: 7 }
+        ]
+      }
+    }
+  } as unknown as mineflayer.Bot;
+  registerUiTools(factory, () => mockBot);
+
+  const result = await getExecutor(mockServer, 'read-scoreboard')({});
+
+  t.false(result.content[0].text.includes('[object Object]'));
+  t.true(result.content[0].text.includes('Sidebar: §6CraftRune'));
+  t.true(result.content[0].text.includes('§bKills: 7'));
+});
+
 test('read-scoreboard reports when nothing is displayed', async (t) => {
   const { factory, mockServer } = makeFactory();
   const mockBot = { scoreboard: {} } as unknown as mineflayer.Bot;

@@ -490,3 +490,22 @@ test.serial('web viewer follows the bot through connect, swap and disconnect wit
     webViewer.stop();
   }
 });
+
+test.serial('spawn does not announce the bot in server chat', async (t) => {
+  const config = { host: 'localhost', port: 25565, username: 'TestBot' };
+  const callbacks = { onLog: sinon.stub(), onChatMessage: sinon.stub() };
+  const connection = new BotConnection(config, callbacks);
+
+  const bot = makeFakeBot();
+  const createBot = sinon.stub(mineflayer, 'createBot').returns(bot);
+
+  try {
+    const promise = connection.connectTo({ host: 'h', port: 1234, username: 'TestBot' });
+    bot.emit('spawn');
+    await promise;
+
+    t.false((bot.chat as sinon.SinonStub).called, 'the bot must stay silent on join');
+  } finally {
+    createBot.restore();
+  }
+});

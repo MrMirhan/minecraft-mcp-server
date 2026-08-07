@@ -78,4 +78,60 @@ export function registerInventoryTools(factory: ToolFactory, getBot: () => minef
       return factory.createResponse(`Equipped ${item.name} to ${destination}`);
     }
   );
+
+  factory.registerTool(
+    "use-item",
+    "Use the currently held item, the same as right-clicking it. Opens hub menus and other item-triggered GUIs",
+    {
+      offHand: z.boolean().optional().describe("Use the off-hand item instead of the main hand (default: false)"),
+      waitForWindowMs: z.number().optional().describe("How long to wait for a GUI window to open, in ms (default: 1500)")
+    },
+    async ({ offHand = false, waitForWindowMs = 1500 }) => {
+      const bot = getBot();
+      const held = offHand ? bot.inventory.slots[45] : bot.heldItem;
+
+      if (!held) {
+        return factory.createResponse(`Nothing is held in the ${offHand ? 'off hand' : 'main hand'}. Use equip-item first.`);
+      }
+
+      const opened = new Promise<string | null>((resolve) => {
+        const timer = setTimeout(() => {
+          bot.removeListener('windowOpen', onOpen);
+          resolve(null);
+        }, waitForWindowMs);
+
+        function onOpen(window: { title?: unknown }): void {
+          clearTimeout(timer);
+          resolve(chatToMotd(window.title));
+        }
+
+        bot.once('windowOpen', onOpen);
+      });
+
+      bot.activateItem(offHand);
+      const title = await opened;
+
+      if (title === null) {
+        return factory.createResponse(`Used ${held.name}. No window opened within ${waitForWindowMs}ms.`);
+      }
+
+      return factory.createResponse(`Used ${held.name}. Window "${title}" opened — use read-window or render-window to inspect it.`);
+    }
+  );
+}
+
+function chatToMotd(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    const maybeChat = value as { toMotd?: () => string; text?: unknown };
+    if (typeof maybeChat.toMotd === 'function') {
+      return maybeChat.toMotd();
+    }
+    if (typeof maybeChat.text === 'string') {
+      return maybeChat.text;
+    }
+  }
+  return String(value ?? '');
 }

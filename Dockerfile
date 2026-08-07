@@ -43,6 +43,11 @@ RUN cd node_modules/prismarine-viewer/public/textures \
          case "$entry" in 1.21.4|1.21.4.png|1.21.1|1.21.1.png|1.20.1|1.20.1.png) ;; *) rm -rf "$entry" ;; esac; \
        done
 
+# prismarine-viewer's entities.json still points at pre-1.20 texture paths (entity/steve),
+# so players and NPCs render untextured. Copy each missing file from its current location.
+COPY scripts/fix-entity-textures.mjs ./scripts/
+RUN node scripts/fix-entity-textures.mjs
+
 COPY --from=builder /app/dist ./dist
 
 COPY entrypoint.sh /entrypoint.sh
