@@ -155,6 +155,17 @@ RUN cd "${MC_CLIENT_DIR}" && java \
 #    detached, breaking McClient's process-liveness tracking), no `-specifics` (that pulls in
 #    hmc-specifics, an unrelated mod with its own command set — mc-cli is the control surface
 #    here). `< /dev/null`: matches the previous script's non-interactive safeguard.
+#
+# guiScale and fullscreen are re-applied to options.txt on every launch rather than seeded once
+# at build time: options.txt does not exist until Minecraft's first real run, and re-applying
+# on every start (not just the first) means a value never silently reverts, whatever Minecraft
+# itself does to the file. fullscreen:true fills the Xvfb screen at its configured 1280x720
+# (confirmed live: HeadlessMC's -Dhmc.check.xvfb=true path resizes to the real display, not the
+# 854x480 window default) rather than needing separate overrideWidth/overrideHeight keys.
+#
+# MCCLI_USERNAME/MCCLI_UUID come from the environment McClient.ts sets when it spawns this
+# script (see spawnProcess); the fallbacks below only matter for a manual run inside the
+# container and must match src/mc-client.ts's own DEFAULT_USERNAME fallback.
 RUN { \
       echo '#!/bin/bash'; \
       echo 'set -e'; \
@@ -171,15 +182,24 @@ RUN { \
       echo '    sleep 0.2'; \
       echo '  done'; \
       echo 'fi'; \
+      echo 'MCCLI_USERNAME="${MCCLI_USERNAME:-LLMBotClient}"'; \
+      echo "OPTIONS_FILE=\"${MC_CLIENT_DIR}/game/options.txt\""; \
+      echo 'touch "$OPTIONS_FILE"'; \
+      echo 'set_mc_option() {'; \
+      echo '  if grep -q "^$1:" "$OPTIONS_FILE"; then'; \
+      echo '    sed -i "s/^$1:.*/$1:$2/" "$OPTIONS_FILE"'; \
+      echo '  else'; \
+      echo '    echo "$1:$2" >> "$OPTIONS_FILE"'; \
+      echo '  fi'; \
+      echo '}'; \
+      echo 'set_mc_option guiScale 2'; \
+      echo 'set_mc_option fullscreen true'; \
       echo "cd \"${MC_CLIENT_DIR}\""; \
-      echo 'exec java \'; \
-      echo "  -Duser.home=\"${MC_CLIENT_DIR}/home\" \\"; \
-      echo '  -Dhmc.offline=true \'; \
-      echo '  -Dhmc.check.xvfb=true \'; \
-      echo "  -Dhmc.gamedir=\"${MC_CLIENT_DIR}/game\" \\"; \
-      echo "  -Dhmc.java.versions=\"${JAVA_HOME}/bin/java\" \\"; \
-      echo '  -jar headlessmc-launcher.jar \'; \
-      echo "  --command \"launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -offline --jvm -Xmx1536M\" < /dev/null"; \
+      echo "JAVA_ARGS=(-Duser.home=\"${MC_CLIENT_DIR}/home\" -Dhmc.offline=true -Dhmc.check.xvfb=true -Dhmc.offline.username=\"\$MCCLI_USERNAME\" -Dhmc.gamedir=\"${MC_CLIENT_DIR}/game\" -Dhmc.java.versions=\"${JAVA_HOME}/bin/java\")"; \
+      echo 'if [ -n "$MCCLI_UUID" ]; then'; \
+      echo '  JAVA_ARGS+=(-Dhmc.offline.uuid="$MCCLI_UUID")'; \
+      echo 'fi'; \
+      echo "exec java \"\${JAVA_ARGS[@]}\" -jar headlessmc-launcher.jar --command \"launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -offline --jvm -Xmx1536M\" < /dev/null"; \
     } > "${MCCLI_LAUNCH_SCRIPT}" \
     && chmod +x "${MCCLI_LAUNCH_SCRIPT}"
 

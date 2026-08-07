@@ -14,6 +14,7 @@ function formatStatus(status: Awaited<ReturnType<McClient['getStatus']>>): strin
   const lines = [
     `Process: ${status.processState}`,
     `PID: ${status.pid ?? 'none'}`,
+    `Username: ${status.username}`,
     `Started: ${status.startedAt ?? 'never'}`,
     `Socket reachable: ${status.socketReachable ? 'yes' : 'no'}`
   ];
@@ -45,6 +46,26 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
     async () => {
       const status = await mcClient.getStatus();
       return factory.createResponse(formatStatus(status));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-set-username",
+    "Change the real Minecraft client's in-game username, deriving the matching offline UUID the same way a server would. The username is a JVM property fixed at launch, so if the client is currently running this restarts it to apply the change; the tool response says whether a restart happened. If the client is not running, the new value is recorded for the next launch.",
+    {
+      username: z.string().describe("New in-game username, 3-16 letters, digits and underscores")
+    },
+    async ({ username }: { username: string }) => {
+      const result = await mcClient.setUsername(username);
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      const { uuid, restarted } = result.data as { uuid: string; restarted: boolean };
+      const message = restarted
+        ? `Username changed to "${username}" (offline UUID ${uuid}). The client was restarted to apply it.`
+        : `Username set to "${username}" (offline UUID ${uuid}). The client is not running, so this takes effect on the next launch.`;
+      return factory.createResponse(message);
     },
     { skipConnectionCheck: true }
   );

@@ -166,7 +166,8 @@ These tools manage the live web viewer. They work even when the bot is not conne
 
 ### Real Client
 These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected. The client runs a Fabric build of the mod ([why](#real-client-1)), which drops several backend commands the previous NeoForge build had. The six tools marked **(not on Fabric)** below call one of those dropped commands and return the mod's own "Unknown command" error instead of succeeding — everything else works normally.
-- `client-status` - Check whether the client process is running, whether its socket is reachable, and what is on screen. Never launches the client. The "what is on screen" part needs the dropped `window` command, so it is always omitted now; process/socket status is unaffected.
+- `client-status` - Check whether the client process is running, whether its socket is reachable, its current username, and what is on screen. Never launches the client. The "what is on screen" part needs the dropped `window` command, so it is always omitted now; process/socket status is unaffected.
+- `client-set-username` - Change the client's in-game username, deriving the matching offline UUID the way a server would. Restarts the client if it is currently running (the response says so); otherwise the value applies on the next launch.
 - `client-capture` - Take a screenshot from the real client, resource packs and all. Optional `clean` hides the HUD. Launches the client on first use.
 - `client-use-item` **(not on Fabric)** - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
 - `client-close-screen` **(not on Fabric)** - Close any GUI screen open on the client.

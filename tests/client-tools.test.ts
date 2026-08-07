@@ -7,7 +7,7 @@ import type { BotConnection } from '../src/bot-connection.js';
 import type { McClient, McClientStatus, McCommandResult } from '../src/mc-client.js';
 
 const TOOL_NAMES = [
-  'client-status', 'client-capture', 'client-use-item', 'client-close-screen',
+  'client-status', 'client-set-username', 'client-capture', 'client-use-item', 'client-close-screen',
   'client-inventory', 'client-item', 'client-block', 'client-entity',
   'client-teleport', 'client-camera', 'client-gamemode', 'client-spectate',
   'client-connect', 'client-disconnect', 'client-execute'
@@ -25,6 +25,7 @@ function baseStatus(overrides: Partial<McClientStatus> = {}): McClientStatus {
     lastLogLines: [],
     game: null,
     screen: null,
+    username: 'LLMBotClient',
     ...overrides
   };
 }
@@ -42,6 +43,7 @@ function setup(clientOverrides: Partial<McClient> = {}, connectionOverrides: Par
     request: sinon.stub().resolves({ ok: true, data: {} } as McCommandResult),
     getStatus: sinon.stub().resolves(baseStatus()),
     captureScreenshot: sinon.stub().resolves({ ok: true, buffer: Buffer.from('fake-png') }),
+    setUsername: sinon.stub().resolves({ ok: true, data: { username: 'NewName', uuid: 'fake-uuid', restarted: false } } as McCommandResult),
     ...clientOverrides
   } as unknown as McClient;
   registerClientTools(factory, mockClient);
@@ -83,7 +85,9 @@ test('client-* tools run even when the mineflayer bot is not connected (skipConn
             ? { address: 'h' }
             : name === 'client-execute'
               ? { command: 'say hi' }
-              : {};
+              : name === 'client-set-username'
+                ? { username: 'NewName' }
+                : {};
 
     const result = await executor(args);
     const text = result.content[0].type === 'text' ? result.content[0].text : '';
@@ -104,6 +108,61 @@ test('client-status never calls request, only getStatus', async (t) => {
   t.falsy(result.isError);
   t.true(result.content[0].text.includes('running'));
   t.true(result.content[0].text.includes('99'));
+});
+
+test('client-status reports the current username', async (t) => {
+  const { mockServer } = setup({ getStatus: sinon.stub().resolves(baseStatus({ username: 'CustomName' })) });
+  const { executor } = getExecutor(mockServer, 'client-status');
+
+  const result = await executor({});
+
+  t.true(result.content[0].text.includes('CustomName'));
+});
+
+test('client-set-username forwards the username to McClient.setUsername', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-set-username');
+
+  await executor({ username: 'NewName' });
+
+  t.true((mockClient.setUsername as sinon.SinonStub).calledWith('NewName'));
+});
+
+test('client-set-username reports a restart when the client was running', async (t) => {
+  const { mockServer } = setup({
+    setUsername: sinon.stub().resolves({ ok: true, data: { username: 'NewName', uuid: 'fake-uuid', restarted: true } } as McCommandResult)
+  });
+  const { executor } = getExecutor(mockServer, 'client-set-username');
+
+  const result = await executor({ username: 'NewName' });
+
+  t.falsy(result.isError);
+  t.true(result.content[0].text.includes('NewName'));
+  t.true(result.content[0].text.includes('restarted'));
+});
+
+test('client-set-username reports the value is recorded for next launch when the client was not running', async (t) => {
+  const { mockServer } = setup({
+    setUsername: sinon.stub().resolves({ ok: true, data: { username: 'NewName', uuid: 'fake-uuid', restarted: false } } as McCommandResult)
+  });
+  const { executor } = getExecutor(mockServer, 'client-set-username');
+
+  const result = await executor({ username: 'NewName' });
+
+  t.falsy(result.isError);
+  t.true(result.content[0].text.includes('next launch'));
+});
+
+test('client-set-username returns a text error when McClient rejects the username', async (t) => {
+  const { mockServer } = setup({
+    setUsername: sinon.stub().resolves({ ok: false, error: '"a b" is not a valid Minecraft username (3-16 letters, digits and underscores).' } as McCommandResult)
+  });
+  const { executor } = getExecutor(mockServer, 'client-set-username');
+
+  const result = await executor({ username: 'a b' });
+
+  t.true(result.isError);
+  t.true(result.content[0].text.includes('not a valid Minecraft username'));
 });
 
 test('client-status reports a launch failure with diagnostics', async (t) => {
@@ -303,7 +362,7 @@ test('every client-* tool returns a text error, not a throw, when the client is 
   const unreachable: McCommandResult = { ok: false, error: 'Could not reach the Minecraft client at 127.0.0.1:25580: connect ECONNREFUSED' };
   const { mockServer } = setup({ request: sinon.stub().resolves(unreachable) });
 
-  const toolsUsingRequest = TOOL_NAMES.filter((name) => name !== 'client-status' && name !== 'client-capture');
+  const toolsUsingRequest = TOOL_NAMES.filter((name) => name !== 'client-status' && name !== 'client-capture' && name !== 'client-set-username');
 
   for (const name of toolsUsingRequest) {
     const { executor } = getExecutor(mockServer, name);
@@ -317,7 +376,9 @@ test('every client-* tool returns a text error, not a throw, when the client is 
             ? { address: 'h' }
             : name === 'client-execute'
               ? { command: 'say hi' }
-              : {};
+              : name === 'client-set-username'
+                ? { username: 'NewName' }
+                : {};
 
     const result = await executor(args);
     t.true(result.isError, `${name} must mark isError on failure`);

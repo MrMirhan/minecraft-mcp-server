@@ -2,7 +2,7 @@ import net from 'node:net';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
@@ -11,12 +11,29 @@ const DEFAULT_PORT = Number(process.env.MCCLI_PORT) || 25580;
 const DEFAULT_LAUNCH_SCRIPT = process.env.MCCLI_LAUNCH_SCRIPT || '/app/mc-client/launch-client.sh';
 const DEFAULT_SCREENSHOT_DIR = process.env.MCCLI_SCREENSHOT_DIR || '/app/mc-client/screenshots';
 const DEFAULT_SOCKET_TIMEOUT_MS = Number(process.env.MCCLI_SOCKET_TIMEOUT_MS) || 10_000;
+// Must match the fallback baked into launch-client.sh's own `${MCCLI_USERNAME:-...}`.
+const DEFAULT_USERNAME = process.env.MCCLI_USERNAME || 'LLMBotClient';
 // A real Minecraft client under software rendering realistically takes tens of seconds to
 // reach the main menu / world, not the ~5-10s a normal socket call gets.
 const DEFAULT_LAUNCH_TIMEOUT_MS = Number(process.env.MCCLI_LAUNCH_TIMEOUT_MS) || 90_000;
 const LAUNCH_POLL_INTERVAL_MS = 1000;
 const PROBE_TIMEOUT_MS = 1500;
 const LOG_RING_SIZE = 60;
+const USERNAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
+const STOP_TIMEOUT_MS = 5000;
+
+export function isValidMinecraftUsername(username: string): boolean {
+  return USERNAME_PATTERN.test(username);
+}
+
+/** Same derivation as Minecraft's `UUID.nameUUIDFromBytes` over `"OfflinePlayer:" + name` — a version-3, RFC 4122 UUID, so a given username always maps to the same offline UUID a server would compute. */
+export function offlinePlayerUuid(username: string): string {
+  const hash = createHash('md5').update(`OfflinePlayer:${username}`, 'utf8').digest();
+  hash[6] = (hash[6] & 0x0f) | 0x30;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  const hex = hash.toString('hex');
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
+}
 
 export interface McClientOptions {
   host?: string;
@@ -27,6 +44,7 @@ export interface McClientOptions {
   screenshotDir?: string;
   autoLaunch?: boolean;
   spawnFn?: SpawnFn;
+  username?: string;
 }
 
 export type McCommandResult =
@@ -53,6 +71,7 @@ export interface McClientStatus {
   lastLogLines: string[];
   game: Record<string, unknown> | null;
   screen: Record<string, unknown> | null;
+  username: string;
 }
 
 function errorMessage(err: unknown): string {
@@ -90,6 +109,8 @@ export class McClient {
 
   private state: ProcessState = freshState();
   private launchingPromise: Promise<McCommandResult> | null = null;
+  private username: string;
+  private uuid: string;
 
   constructor(options: McClientOptions = {}) {
     this.host = options.host ?? DEFAULT_HOST;
@@ -100,6 +121,8 @@ export class McClient {
     this.screenshotDir = options.screenshotDir ?? DEFAULT_SCREENSHOT_DIR;
     this.autoLaunch = options.autoLaunch ?? true;
     this.spawnFn = options.spawnFn ?? (spawn as SpawnFn);
+    this.username = options.username ?? DEFAULT_USERNAME;
+    this.uuid = offlinePlayerUuid(this.username);
   }
 
   async request(
@@ -154,12 +177,36 @@ export class McClient {
       socketReachable,
       lastLogLines: this.state.logLines.slice(-10),
       game,
-      screen
+      screen,
+      username: this.username
     };
   }
 
   getScreenshotDir(): string {
     return this.screenshotDir;
+  }
+
+  /** Username is a JVM property fixed at launch, so changing it restarts a running client. */
+  async setUsername(username: string): Promise<McCommandResult> {
+    if (!isValidMinecraftUsername(username)) {
+      return { ok: false, error: `"${username}" is not a valid Minecraft username (3-16 letters, digits and underscores).` };
+    }
+
+    const uuid = offlinePlayerUuid(username);
+    const wasRunning = this.isProcessAlive();
+    this.username = username;
+    this.uuid = uuid;
+
+    if (!wasRunning) {
+      return { ok: true, data: { username, uuid, restarted: false } };
+    }
+
+    await this.stopProcess();
+    const launch = await this.ensureLaunched();
+    if (!launch.ok) {
+      return { ok: false, error: `Username updated to "${username}" but the client failed to restart: ${launch.error}` };
+    }
+    return { ok: true, data: { username, uuid, restarted: true } };
   }
 
   async captureScreenshot(clean: boolean): Promise<{ ok: true; buffer: Buffer } | { ok: false; error: string }> {
@@ -204,13 +251,29 @@ export class McClient {
     }
   }
 
+  private stopProcess(timeoutMs: number = STOP_TIMEOUT_MS): Promise<void> {
+    const child = this.state.child;
+    if (!child || !this.isProcessAlive()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      child.once('exit', () => resolve());
+      child.kill('SIGTERM');
+      const killTimer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+      child.once('exit', () => clearTimeout(killTimer));
+    });
+  }
+
   private spawnProcess(): void {
     this.state = freshState(this.state.logLines);
     this.state.startedAt = Date.now();
 
     let child: ChildProcess;
     try {
-      child = this.spawnFn(this.launchScript, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = this.spawnFn(this.launchScript, [], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, MCCLI_USERNAME: this.username, MCCLI_UUID: this.uuid }
+      });
     } catch (err) {
       this.state.spawnError = errorMessage(err);
       return;
