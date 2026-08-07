@@ -47,112 +47,114 @@ RUN cd node_modules/prismarine-viewer/public/textures \
          case "$entry" in 1.21.4|1.21.4.png|1.21.1|1.21.1.png|1.20.1|1.20.1.png) ;; *) rm -rf "$entry" ;; esac; \
        done
 
-# --- Real Minecraft client (Th0rgal/mc-cli, NeoForge build) ---
+# --- Real Minecraft client (HeadlessMC launcher + Th0rgal/mc-cli, Fabric build) ---
 # A second eye on the world: mineflayer/prismarine-viewer draw vanilla assets only, so
 # holograms, resource packs, custom models and GUI screens are invisible to them. This runs
-# an actual NeoForge Minecraft client headlessly (Xvfb + Mesa software OpenGL, no GPU) and
-# talks to its TCP/JSON control socket. See client-status/client-* tools and src/mc-client.ts.
+# an actual Fabric Minecraft client headlessly (Xvfb + Mesa software OpenGL, no GPU) and talks
+# to its TCP/JSON control socket. See client-status/client-* tools and src/mc-client.ts.
 #
-# Versions are pinned, not "latest" — a moving NeoForge/mod version breaks reproducible
-# builds. Runs offline-mode (fake username/uuid/token below): the user has no premium account.
+# A previous attempt hand-built the launch command for a NeoForge client (concatenating every
+# jar under libraries/ alphabetically, then invoking net.neoforged.fml.startup.Client
+# directly). That broke two ways on the live container: (1) the alphabetical classpath put an
+# older ASM ahead of the one FML needed, so FML's own bootstrap failed with a
+# `NoSuchMethodError` on an ASM method, and (2) FML's early-display splash window tried to open
+# a GL context and threw a NullPointerException under llvmpipe, which masked (1) until the
+# splash was disabled.
+#
+# HeadlessMC (https://github.com/headlesshq/headlessmc) is a real launcher: `fabric` below
+# resolves the Minecraft + Fabric Loader classpath, natives and JVM args the same way the
+# vanilla Mojang launcher would, which is what fixes (1) — confirmed by running this chain in
+# a scoped container: the ASM NoSuchMethodError is gone. Switching the mod loader to Fabric
+# removes (2) outright, since Fabric has no early-display splash window to crash on. Real
+# rendering still happens under Xvfb + llvmpipe (confirmed in the same scoped run: real texture
+# atlases were built and a captured screenshot had full pixel variance, not a blank frame) —
+# HeadlessMC's own `-lwjgl` flag, which rewrites every LWJGL call to a no-op stub, is never
+# passed, and `hmc.assets.dummy` is never used, because real assets are the entire point of
+# this feature. HeadlessMC silently falls back to that same `-lwjgl` no-op stub whenever it is
+# offline (mandatory here — no premium account) and does not positively detect Xvfb, and that
+# detection only runs when `hmc.check.xvfb` is set (default false) — so launch-client.sh below
+# sets it explicitly every time, not just relying on Xvfb being up.
+#
+# Fabric's mc-cli build only ships 10 of the 20 commands the NeoForge build had: `interact`,
+# `inventory`, `item`, `block`, `entity`, `window` and `resourcepack` are gone. client-* tools
+# whose backend command is missing now surface the mod's own "unknown command" error instead of
+# succeeding — see README.md/GUIDE.md for exactly which tools that affects.
+#
+# Versions are pinned, not "latest" — a moving HeadlessMC/Fabric Loader/mccli/Fabric API
+# version breaks reproducible builds. Runs offline-mode (fake username/uuid below): the user
+# has no premium account.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 jq curl \
+    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 x11-xserver-utils procps curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=java21 /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-ARG NEOFORGE_VERSION=21.11.45
-ARG NEOFORGE_INSTALLER_SHA256=e54350cc68d7dec6cb0523a0597a6a2fa664c1acd878b456af4564ee126da00a
-ARG MCCLI_VERSION=1.4.0
-ARG MCCLI_JAR_SHA256=dc9099548595301e25eb6d57fbaf128d4ad348358a957666a4b369d5482a3942
+ARG HEADLESSMC_VERSION=2.10.0
+ARG HEADLESSMC_JAR_SHA256=52bd5006f478377b3893011d458562977d38c65ead6d2b31089beb4d614f13cd
 ARG MC_VERSION=1.21.11
-ARG NEOFORM_VERSION=20251209.172050
+ARG FABRIC_LOADER_VERSION=0.19.3
+ARG MCCLI_VERSION=1.4.0
+ARG MCCLI_FABRIC_JAR_SHA256=f321589cdfc70232191705c9b295c63ce0947a2fa58446b4327921d4a3b745f4
+ARG FABRIC_API_FILENAME=fabric-api-0.141.6+1.21.11.jar
+ARG FABRIC_API_MODRINTH_VERSION=6qAuTtLR
+ARG FABRIC_API_JAR_SHA256=bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f
 ENV MC_CLIENT_DIR=/app/mc-client
 ENV MCCLI_LAUNCH_SCRIPT=${MC_CLIENT_DIR}/launch-client.sh
 ENV MCCLI_SCREENSHOT_DIR=${MC_CLIENT_DIR}/screenshots
 
-# 1. Run the NeoForge installer's --install-client mode. It needs a launcher_profiles.json
-#    to already exist (normally created by the vanilla Mojang launcher on first run), and it
-#    downloads + deobfuscates + patches the Minecraft client jar plus NeoForge's own ~26
-#    libraries. It does NOT fetch the ~60 remaining vanilla libraries (guava, gson, netty,
-#    LWJGL + its per-OS natives, ...) — that is normally the vanilla launcher's job, done here
-#    in step 2 instead, filtered to linux-only via each library's `rules`.
-RUN mkdir -p "${MC_CLIENT_DIR}/game" "${MCCLI_SCREENSHOT_DIR}" \
-    && echo '{"profiles":{},"selectedProfile":"","clientToken":"","authenticationDatabase":{},"launcherVersion":{"name":"","format":21}}' \
-         > "${MC_CLIENT_DIR}/game/launcher_profiles.json" \
-    && curl -fsSL -o /tmp/neoforge-installer.jar \
-         "https://maven.neoforged.net/releases/net/neoforged/neoforge/${NEOFORGE_VERSION}/neoforge-${NEOFORGE_VERSION}-installer.jar" \
-    && echo "${NEOFORGE_INSTALLER_SHA256}  /tmp/neoforge-installer.jar" | sha256sum -c - \
-    && java -jar /tmp/neoforge-installer.jar --install-client "${MC_CLIENT_DIR}/game" \
-    && rm -f /tmp/neoforge-installer.jar \
-    && mkdir -p "${MC_CLIENT_DIR}/game/mods" \
-    && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/mccli-neoforge-${MCCLI_VERSION}.jar" \
-         "https://github.com/Th0rgal/mc-cli/releases/download/v${MCCLI_VERSION}/mccli-neoforge-${MCCLI_VERSION}.jar" \
-    && echo "${MCCLI_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/mccli-neoforge-${MCCLI_VERSION}.jar" | sha256sum -c -
+# 1. Fetch the launcher itself, plus the two mods that go in Fabric's mods/ folder: mc-cli's
+#    own control-socket mod, and Fabric API. mc-cli's fabric.mod.json does not declare Fabric
+#    API as a dependency, but its entrypoint class references Fabric API's ClientTickEvents
+#    directly and throws NoClassDefFoundError without it — found by actually launching it in
+#    the scoped test container, not by reading the manifest.
+RUN mkdir -p "${MC_CLIENT_DIR}/game/mods" "${MCCLI_SCREENSHOT_DIR}" \
+    && curl -fsSL -o "${MC_CLIENT_DIR}/headlessmc-launcher.jar" \
+         "https://github.com/headlesshq/headlessmc/releases/download/${HEADLESSMC_VERSION}/headlessmc-launcher-${HEADLESSMC_VERSION}.jar" \
+    && echo "${HEADLESSMC_JAR_SHA256}  ${MC_CLIENT_DIR}/headlessmc-launcher.jar" | sha256sum -c - \
+    && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" \
+         "https://github.com/Th0rgal/mc-cli/releases/download/v${MCCLI_VERSION}/mccli-fabric-${MCCLI_VERSION}.jar" \
+    && echo "${MCCLI_FABRIC_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" | sha256sum -c - \
+    && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" \
+         "https://cdn.modrinth.com/data/P7dR8mSH/versions/${FABRIC_API_MODRINTH_VERSION}/${FABRIC_API_FILENAME}" \
+    && echo "${FABRIC_API_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" | sha256sum -c -
 
-# 2. Fetch the remaining vanilla libraries the installer skipped, and the asset index (block,
-#    item and GUI textures are already inside the patched client jar — only sound objects live
-#    in the separate CDN, and those are skipped: they cost ~450MB and add nothing a screenshot
-#    can show).
-RUN VERSION_JSON="${MC_CLIENT_DIR}/game/versions/${MC_VERSION}/${MC_VERSION}.json" \
-    && LIBDIR="${MC_CLIENT_DIR}/game/libraries" \
-    && jq -c ' \
-         def rule_allows: reduce .[] as $r (false; if ($r.os == null) or ($r.os.name == "linux") then ($r.action == "allow") else . end); \
-         .libraries[] | select((.rules == null) or (.rules | rule_allows)) | select(.downloads.artifact.path != null) | {path: .downloads.artifact.path, url: .downloads.artifact.url} \
-       ' "$VERSION_JSON" > /tmp/needed-libs.jsonl \
-    && while IFS= read -r line; do \
-         p=$(echo "$line" | jq -r '.path'); \
-         u=$(echo "$line" | jq -r '.url'); \
-         dest="$LIBDIR/$p"; \
-         if [ ! -f "$dest" ]; then mkdir -p "$(dirname "$dest")" && curl -fsSL -o "$dest" "$u"; fi; \
-       done < /tmp/needed-libs.jsonl \
-    && rm -f /tmp/needed-libs.jsonl \
-    && ASSET_ID=$(jq -r '.assetIndex.id' "$VERSION_JSON") \
-    && mkdir -p "${MC_CLIENT_DIR}/game/assets/indexes" \
-    && curl -fsSL -o "${MC_CLIENT_DIR}/game/assets/indexes/${ASSET_ID}.json" "$(jq -r '.assetIndex.url' "$VERSION_JSON")"
+# 2. Install Fabric Loader for MC_VERSION. HeadlessMC always keeps the shared library/version/
+#    asset cache at "${user.home}/.minecraft" — `hmc.gamedir` does not relocate it, it only
+#    controls the actual `--gameDir` Minecraft receives (mods/saves/config, set in step 1 and
+#    launch-client.sh below). `-Duser.home` pins that cache under MC_CLIENT_DIR instead of
+#    whichever OS user happens to run the command (root here, `container` at runtime), so both
+#    stages agree on one location — confirmed empirically, not from HeadlessMC's own docs.
+RUN cd "${MC_CLIENT_DIR}" && java \
+      -Duser.home="${MC_CLIENT_DIR}/home" \
+      -Dhmc.offline=true \
+      -Dhmc.gamedir="${MC_CLIENT_DIR}/game" \
+      -Dhmc.java.versions="${JAVA_HOME}/bin/java" \
+      -jar headlessmc-launcher.jar \
+      --command "fabric ${MC_VERSION} --uid ${FABRIC_LOADER_VERSION}"
 
-# 3. Resolve the final classpath once, at build time, and freeze it into a plain launch
-#    script. This mirrors what net.neoforged.fml.startup.Client (the mod loader's own entry
-#    point) expects from the real launcher: every jar under libraries/, offline auth
-#    placeholders, and the --fml.* flags it uses to locate its own patched client jar.
-RUN LIBDIR="${MC_CLIENT_DIR}/game/libraries" \
-    && VERSION_JSON="${MC_CLIENT_DIR}/game/versions/${MC_VERSION}/${MC_VERSION}.json" \
-    && ASSET_ID=$(jq -r '.assetIndex.id' "$VERSION_JSON") \
-    && CP=$(find "$LIBDIR" -name '*.jar' | sort | tr '\n' ':') \
-    && CP="${CP%:}" \
-    && { \
-         echo '#!/bin/bash'; \
-         echo 'set -e'; \
-         echo "NATIVES_DIR=\"${MC_CLIENT_DIR}/game/natives\""; \
-         echo 'mkdir -p "$NATIVES_DIR"'; \
-         echo 'exec java \'; \
-         echo '  -Djava.net.preferIPv6Addresses=system \'; \
-         echo "  -DlibraryDirectory=\"${LIBDIR}\" \\"; \
-         echo '  --add-opens java.base/java.lang.invoke=ALL-UNNAMED \'; \
-         echo '  --add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming \'; \
-         echo '  -Djava.library.path="$NATIVES_DIR" \'; \
-         echo '  -Djna.tmpdir="$NATIVES_DIR" \'; \
-         echo '  -Dorg.lwjgl.system.SharedLibraryExtractPath="$NATIVES_DIR" \'; \
-         echo '  -Dio.netty.native.workdir="$NATIVES_DIR" \'; \
-         echo '  -Dminecraft.launcher.brand=mc-cli-headless \'; \
-         echo '  -Dminecraft.launcher.version=1.0 \'; \
-         echo "  -cp \"${CP}\" \\"; \
-         echo '  net.neoforged.fml.startup.Client \'; \
-         echo "  --username MCPBot --version neoforge-${NEOFORGE_VERSION} \\"; \
-         echo "  --gameDir \"${MC_CLIENT_DIR}/game\" --assetsDir \"${MC_CLIENT_DIR}/game/assets\" --assetIndex ${ASSET_ID} \\"; \
-         echo '  --uuid 00000000-0000-0000-0000-000000000000 --accessToken 0 \'; \
-         echo '  --clientId 0 --xuid 0 --versionType release \'; \
-         echo "  --fml.neoForgeVersion ${NEOFORGE_VERSION} --fml.mcVersion ${MC_VERSION} --fml.neoFormVersion ${NEOFORM_VERSION}"; \
-       } > "${MC_CLIENT_DIR}/run-neoforge.sh" \
-    && chmod +x "${MC_CLIENT_DIR}/run-neoforge.sh"
+# 3. Prefetch every vanilla library and the full real asset set (~450MB) with `-prepare`, which
+#    downloads everything `launch` needs without opening a window — so the only network call
+#    launch-client.sh makes at container runtime is the actual connection to a Minecraft
+#    server. `hmc.assets.dummy` is deliberately never set: real textures are the point.
+RUN cd "${MC_CLIENT_DIR}" && java \
+      -Duser.home="${MC_CLIENT_DIR}/home" \
+      -Dhmc.offline=true \
+      -Dhmc.gamedir="${MC_CLIENT_DIR}/game" \
+      -Dhmc.java.versions="${JAVA_HOME}/bin/java" \
+      -jar headlessmc-launcher.jar \
+      --command "launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -prepare -offline"
 
 # 4. The script mc-client.ts actually spawns: brings up Xvfb (idempotent — reused across
-#    relaunches within the same container) with software OpenGL, then hands off to the
-#    resolved launch command above. Runs offline/non-interactive (< /dev/null): without a
-#    real display, NeoForge's early-display error screen falls back to an interactive
-#    console prompt that would otherwise spin forever reading a stdin that never answers.
+#    relaunches within the same container) with software OpenGL, then launches the Fabric
+#    client through HeadlessMC. `-Dhmc.check.xvfb=true` is the load-bearing flag from the
+#    comment above: without it HeadlessMC assumes no real display exists whenever offline and
+#    silently swaps in the LWJGL no-op stub, even with Xvfb genuinely running. No `-lwjgl`,
+#    no `-quit` (would let this script's own process exit while the game keeps running
+#    detached, breaking McClient's process-liveness tracking), no `-specifics` (that pulls in
+#    hmc-specifics, an unrelated mod with its own command set — mc-cli is the control surface
+#    here). `< /dev/null`: matches the previous script's non-interactive safeguard.
 RUN { \
       echo '#!/bin/bash'; \
       echo 'set -e'; \
@@ -169,7 +171,15 @@ RUN { \
       echo '    sleep 0.2'; \
       echo '  done'; \
       echo 'fi'; \
-      echo "exec \"${MC_CLIENT_DIR}/run-neoforge.sh\" < /dev/null"; \
+      echo "cd \"${MC_CLIENT_DIR}\""; \
+      echo 'exec java \'; \
+      echo "  -Duser.home=\"${MC_CLIENT_DIR}/home\" \\"; \
+      echo '  -Dhmc.offline=true \'; \
+      echo '  -Dhmc.check.xvfb=true \'; \
+      echo "  -Dhmc.gamedir=\"${MC_CLIENT_DIR}/game\" \\"; \
+      echo "  -Dhmc.java.versions=\"${JAVA_HOME}/bin/java\" \\"; \
+      echo '  -jar headlessmc-launcher.jar \'; \
+      echo "  --command \"launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -offline --jvm -Xmx1536M\" < /dev/null"; \
     } > "${MCCLI_LAUNCH_SCRIPT}" \
     && chmod +x "${MCCLI_LAUNCH_SCRIPT}"
 

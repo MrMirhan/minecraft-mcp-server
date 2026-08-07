@@ -12,7 +12,7 @@ This guide is for someone who runs this server and directs the bot through it. I
 
 **The web viewer** (`src/web-viewer.ts`) is a small HTTP server, separate from the MCP connection. It shows the bot's 3D world with a scoreboard, boss bar, title, tab list, and window overlay. It starts and stops on its own schedule through `start-viewer` and `stop-viewer`, not tied to any single tool call. See "The live viewer" below.
 
-**The real client** (`src/mc-client.ts`) is a TCP/JSON client for a real Minecraft client process (the mc-cli NeoForge mod), completely separate from `BotConnection` — a different process, a different socket, a different failure domain. See "The real client" below.
+**The real client** (`src/mc-client.ts`) is a TCP/JSON client for a real Minecraft client process (the mc-cli Fabric mod), completely separate from `BotConnection` — a different process, a different socket, a different failure domain. See "The real client" below.
 
 ## Choosing between tools that overlap
 
@@ -72,7 +72,17 @@ Some setups place a further reverse proxy in front of the whole web viewer. If t
 
 ## The real client
 
-`take-screenshot` and `render-window` draw from prismarine-viewer's bundled vanilla assets. They cannot show a resource pack's textures, a `text_display` hologram, a `CustomModelData` model swap, or any GUI screen. The `client-*` tools close that gap by driving an actual Minecraft client, running headlessly inside the Docker image (`Th0rgal/mc-cli`, NeoForge build), reachable over the TCP/JSON socket it exposes on port 25580. `src/mc-client.ts` is the protocol client for that socket.
+`take-screenshot` and `render-window` draw from prismarine-viewer's bundled vanilla assets. They cannot show a resource pack's textures, a `text_display` hologram, a `CustomModelData` model swap, or any GUI screen. The `client-*` tools close that gap by driving an actual Minecraft client, running headlessly inside the Docker image (`Th0rgal/mc-cli`, Fabric build), reachable over the TCP/JSON socket it exposes on port 25580. `src/mc-client.ts` is the protocol client for that socket.
+
+### Why HeadlessMC, and why Fabric
+
+The client used to be launched by hand-concatenating every jar under a NeoForge install's `libraries/` directory alphabetically into one classpath, then invoking `net.neoforged.fml.startup.Client` directly. On the deployed container this failed two different ways: the alphabetical classpath put an older ASM ahead of the one FML needed, so FML's own bootstrap crashed with `NoSuchMethodError: org.objectweb.asm.Type.getMethodDescriptor(...)`; and separately, FML's early-display splash window tried to open a GL context and threw a `NullPointerException` under llvmpipe, masking the ASM error until the splash was disabled.
+
+The Dockerfile now uses [HeadlessMC](https://github.com/headlesshq/headlessmc) as the launcher instead of a hand-built classpath. It resolves the Minecraft + mod-loader classpath, natives, and JVM arguments the way the real Mojang launcher does, which is what fixes the ASM clash — verified by actually running the chain in a scoped container and confirming the `NoSuchMethodError` is gone. Switching the mod loader to Fabric removes the early-display crash outright, since Fabric has no early-display splash window to crash on.
+
+Real rendering still happens under Xvfb + llvmpipe software OpenGL, the same as before — confirmed by capturing a screenshot through the socket and checking its pixel bytes span the full 0–255 range with thousands of distinct colors, not a flat single-color frame. HeadlessMC has its own `-lwjgl` flag that rewrites every LWJGL call to a no-op stub for a truly headless run; `launch-client.sh` never passes it, because real textures are the entire point of this feature. HeadlessMC silently switches to that same no-op stub on its own whenever it is offline (mandatory here — no premium account) and does not detect Xvfb, and Xvfb detection itself only runs when `hmc.check.xvfb` is set (it defaults to `false`) — so `launch-client.sh` sets `-Dhmc.check.xvfb=true` on every launch, not just relying on Xvfb being up. `hmc.assets.dummy`, which would replace real textures with tiny stub files, is never set for the same reason.
+
+Fabric's mc-cli build ships fewer backend commands than the NeoForge build did: `interact`, `inventory`, `item`, `block`, `entity`, `window` and `resourcepack` are gone; `status`, `teleport`, `camera`, `time`, `execute`, `server`, `capture`/`screenshot`, `perf`, `logs` and `shader` remain (confirmed by sending each command directly over the socket, not by reading a manifest). Six `client-*` tools call one of the missing commands and now return the mod's own `Unknown command: <name>` error: `client-use-item`, `client-close-screen`, `client-inventory`, `client-item`, `client-block`, `client-entity`. `client-status` also loses the "what is on screen" half of its report, since that used the missing `window` command internally, but the tool itself does not error — it just omits that field. Every other `client-*` tool is unaffected. GUI screens that used to open via `client-use-item` can still be reached by sending the equivalent server-side command through `client-execute`.
 
 This is a second, independent connection to the Minecraft server. The bot (`BotConnection`, mineflayer) and the client are unrelated processes with unrelated failure modes — a dead client never affects the bot's 45 tools, and a dead bot never affects the `client-*` tools. All `client-*` tools set `skipConnectionCheck`, so they work even when the bot is not connected.
 
@@ -84,7 +94,7 @@ Once launched, the client process stays up for the life of the container and is 
 
 ### Wire protocol
 
-Newline-delimited JSON over TCP, one request per line, one connection per request (`{"id":"...", "command":"...", "params":{...}}` in, `{"id":"...","success":true,"data":{...}}` or `{"id":"...","success":false,"error":{"code":"...","message":"..."}}` out). This comes from the mod's own source (`mod/neoforge/src/main/java/dev/mccli/server/ClientHandler.java` and `CommandDispatcher.java` in `Th0rgal/mc-cli`), not from `docs/COMMANDS.md`, which documents the Python CLI's command names rather than the socket's command names — they differ (for example, the CLI's `capture` command sends the socket command `screenshot`).
+Newline-delimited JSON over TCP, one request per line, one connection per request (`{"id":"...", "command":"...", "params":{...}}` in, `{"id":"...","success":true,"data":{...}}` or `{"id":"...","success":false,"error":{"code":"...","message":"..."}}` out). This comes from the mod's own source (`mod/fabric/src/main/java/dev/mccli/server/ClientHandler.java` and `CommandDispatcher.java` in `Th0rgal/mc-cli`), not from `docs/COMMANDS.md`, which documents the Python CLI's command names rather than the socket's command names — they differ (for example, the CLI's `capture` command sends the socket command `screenshot`).
 
 ### Error handling
 
@@ -97,7 +107,7 @@ Every `client-*` tool call goes through `McClient`, which never throws and never
 
 ### Real accounts are not required
 
-The bundled client runs offline-mode: a fixed, fake username/UUID/access token baked into its launch script. The user has no premium Minecraft account, and none is needed — offline-mode clients can still join any server with `online-mode=false`, which is what this is for.
+The bundled client runs offline-mode: `launch-client.sh` sets `hmc.offline=true` and passes `-offline` to HeadlessMC's `launch` command, which generates a fixed fake username/UUID rather than authenticating against Mojang. The user has no premium Minecraft account, and none is needed — offline-mode clients can still join any server with `online-mode=false`, which is what this is for.
 
 ## Screenshot limits
 

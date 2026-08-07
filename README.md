@@ -165,21 +165,21 @@ These tools manage the live web viewer. They work even when the bot is not conne
 - `get-viewer-url` - Get the live web viewer's URL, if it is running.
 
 ### Real Client
-These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected.
-- `client-status` - Check whether the client process is running, whether its socket is reachable, and what is on screen. Never launches the client.
+These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected. The client runs a Fabric build of the mod ([why](#real-client-1)), which drops several backend commands the previous NeoForge build had. The six tools marked **(not on Fabric)** below call one of those dropped commands and return the mod's own "Unknown command" error instead of succeeding — everything else works normally.
+- `client-status` - Check whether the client process is running, whether its socket is reachable, and what is on screen. Never launches the client. The "what is on screen" part needs the dropped `window` command, so it is always omitted now; process/socket status is unaffected.
 - `client-capture` - Take a screenshot from the real client, resource packs and all. Optional `clean` hides the HUD. Launches the client on first use.
-- `client-use-item` - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
-- `client-close-screen` - Close any GUI screen open on the client.
-- `client-inventory` - List the client's inventory. Optional `section`, `includeEmpty`, `includeNbt`.
-- `client-item` - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
-- `client-block` - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
-- `client-entity` - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
+- `client-use-item` **(not on Fabric)** - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
+- `client-close-screen` **(not on Fabric)** - Close any GUI screen open on the client.
+- `client-inventory` **(not on Fabric)** - List the client's inventory. Optional `section`, `includeEmpty`, `includeNbt`.
+- `client-item` **(not on Fabric)** - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
+- `client-block` **(not on Fabric)** - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
+- `client-entity` **(not on Fabric)** - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
 - `client-teleport` - Move the client to coordinates. Takes `x`, `y`, `z`.
 - `client-camera` - Set the client's view direction. Takes `yaw`, `pitch`.
 - `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
 - `client-spectate` - Ride another player's view, to capture a screenshot from their viewpoint. Takes optional `player`; call with none to leave spectating.
 - `client-connect` / `client-disconnect` - Connect or disconnect the client from a Minecraft server, independently of the bot.
-- `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch.
+- `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch. GUIs that used to open via `client-use-item` can still be reached this way, by sending the server-side command that opens them.
 
 ## Live Web Viewer
 
@@ -193,7 +193,9 @@ Set `WEB_VIEWER_PORT` to change the port (default: `3007`). See [GUIDE.md](GUIDE
 
 ## Real Client
 
-`take-screenshot` renders vanilla assets only — no resource packs, holograms, custom models or GUI screens. The `client-*` tools close that gap by driving an actual Minecraft client ([Th0rgal/mc-cli](https://github.com/Th0rgal/mc-cli), NeoForge build) that runs headlessly in the Docker image and exposes a TCP/JSON control socket. It is a second, independent connection to the server — the bot does the automation, the client is the eye.
+`take-screenshot` renders vanilla assets only — no resource packs, holograms, custom models or GUI screens. The `client-*` tools close that gap by driving an actual Minecraft client ([Th0rgal/mc-cli](https://github.com/Th0rgal/mc-cli), Fabric build) that runs headlessly in the Docker image and exposes a TCP/JSON control socket. It is a second, independent connection to the server — the bot does the automation, the client is the eye.
+
+The client is launched by [HeadlessMC](https://github.com/headlesshq/headlessmc), a real Minecraft launcher, rather than a hand-built classpath — see [GUIDE.md](GUIDE.md) for why. Fabric's mc-cli build has fewer backend commands than the NeoForge build this image used to run; see the tool list above for exactly which `client-*` tools that affects.
 
 The client launches lazily, on the first `client-*` tool call that needs it (`client-status` never launches it). The first call after a fresh container start can take up to a minute while the client boots. If the client is not running, its socket is unreachable, or a command times out, the `client-*` tools return a clear text error; they never hang the server, and every other tool keeps working normally regardless of the client's state.
 
@@ -215,7 +217,7 @@ The MCP endpoint is then served at `http://HOST:3000/mcp` and protected by the b
 
 Two more variables control optional features. `CHROMIUM_PATH` sets the browser used by `take-screenshot` (default: `/usr/bin/chromium`, already set in this image). `WEB_VIEWER_PORT` sets the port for the live web viewer (default: `3007`).
 
-The image also bundles the real Minecraft client the `client-*` tools drive: Java 21, a pinned NeoForge build for Minecraft 1.21.11, the pinned `mccli-neoforge` mod jar, and Xvfb with Mesa software OpenGL (there is no GPU). It runs offline-mode, since a hosted deployment has no premium Microsoft account. `MCCLI_HOST` and `MCCLI_PORT` point at the client's control socket (default: `127.0.0.1:25580`, already correct for this image).
+The image also bundles the real Minecraft client the `client-*` tools drive: Java 21, [HeadlessMC](https://github.com/headlesshq/headlessmc) as the launcher, a pinned Fabric Loader build for Minecraft 1.21.11, the pinned `mccli-fabric` and Fabric API mod jars, and Xvfb with Mesa software OpenGL (there is no GPU). It runs offline-mode, since a hosted deployment has no premium Microsoft account. `MCCLI_HOST` and `MCCLI_PORT` point at the client's control socket (default: `127.0.0.1:25580`, already correct for this image).
 
 Point an MCP client that supports the Streamable HTTP URL transport at the endpoint, sending the token as an `Authorization` header:
 
