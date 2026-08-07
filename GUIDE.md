@@ -12,6 +12,8 @@ This guide is for someone who runs this server and directs the bot through it. I
 
 **The web viewer** (`src/web-viewer.ts`) is a small HTTP server, separate from the MCP connection. It shows the bot's 3D world with a scoreboard, boss bar, title, tab list, and window overlay. It starts and stops on its own schedule through `start-viewer` and `stop-viewer`, not tied to any single tool call. See "The live viewer" below.
 
+**The real client** (`src/mc-client.ts`) is a TCP/JSON client for a real Minecraft client process (the mc-cli NeoForge mod), completely separate from `BotConnection` — a different process, a different socket, a different failure domain. See "The real client" below.
+
 ## Choosing between tools that overlap
 
 ### `read-window` versus `render-window`
@@ -68,6 +70,35 @@ A known limit affects reverse proxies. prismarine-viewer's bundled browser clien
 
 Some setups place a further reverse proxy in front of the whole web viewer. If that proxy forwards only a subpath, it must also forward the bare `/socket.io` path at the domain root. For example, a proxy that forwards only `https://example.com/bot/` must also forward `https://example.com/socket.io` to the same backend. Without that second rule, the overlay page loads, but the 3D world never streams.
 
+## The real client
+
+`take-screenshot` and `render-window` draw from prismarine-viewer's bundled vanilla assets. They cannot show a resource pack's textures, a `text_display` hologram, a `CustomModelData` model swap, or any GUI screen. The `client-*` tools close that gap by driving an actual Minecraft client, running headlessly inside the Docker image (`Th0rgal/mc-cli`, NeoForge build), reachable over the TCP/JSON socket it exposes on port 25580. `src/mc-client.ts` is the protocol client for that socket.
+
+This is a second, independent connection to the Minecraft server. The bot (`BotConnection`, mineflayer) and the client are unrelated processes with unrelated failure modes — a dead client never affects the bot's 45 tools, and a dead bot never affects the `client-*` tools. All `client-*` tools set `skipConnectionCheck`, so they work even when the bot is not connected.
+
+### Lifecycle: lazy launch
+
+The client process is not started at container boot, and starting it is not part of the MCP server's own health check. It launches lazily, the first time a `client-*` tool other than `client-status` calls `McClient.request()`. This mirrors the bot's own idle-by-default behavior (`MC_HOST` empty until `connect-to-server` runs): a deployment that never uses the `client-*` tools never pays the client's ~2GB RAM and 30-60s startup cost. The tradeoff is that the first `client-capture` or similar call after a fresh start is slow while the client boots; `client-status` never triggers a launch, so polling status is always cheap.
+
+Once launched, the client process stays up for the life of the container and is reused by every later `client-*` call. `McClient` deduplicates concurrent launch attempts — if two tool calls race the first launch, only one process is spawned.
+
+### Wire protocol
+
+Newline-delimited JSON over TCP, one request per line, one connection per request (`{"id":"...", "command":"...", "params":{...}}` in, `{"id":"...","success":true,"data":{...}}` or `{"id":"...","success":false,"error":{"code":"...","message":"..."}}` out). This comes from the mod's own source (`mod/neoforge/src/main/java/dev/mccli/server/ClientHandler.java` and `CommandDispatcher.java` in `Th0rgal/mc-cli`), not from `docs/COMMANDS.md`, which documents the Python CLI's command names rather than the socket's command names — they differ (for example, the CLI's `capture` command sends the socket command `screenshot`).
+
+### Error handling
+
+Every `client-*` tool call goes through `McClient`, which never throws and never hangs a tool call:
+
+- Every socket call has a timeout (`MCCLI_SOCKET_TIMEOUT_MS`, default 10s). A hung client cannot wedge a tool call past that.
+- Launching has its own, longer timeout (`MCCLI_LAUNCH_TIMEOUT_MS`, default 90s), since a real Minecraft client under software rendering genuinely takes tens of seconds to boot.
+- If the client process fails to spawn, exits early, or the launch timeout elapses, the tool call returns a plain text error naming what happened, with the last log lines captured from the process's own stdout/stderr (a bounded in-memory ring buffer, not a growing file).
+- `client-status` reports the same diagnostics — process state, PID, exit code and signal, spawn error, socket reachability, and recent log lines — without ever launching the client itself.
+
+### Real accounts are not required
+
+The bundled client runs offline-mode: a fixed, fake username/UUID/access token baked into its launch script. The user has no premium Minecraft account, and none is needed — offline-mode clients can still join any server with `online-mode=false`, which is what this is for.
+
 ## Screenshot limits
 
 `take-screenshot` renders through prismarine-viewer, which supports Minecraft versions up to 1.21.4. This server connects to 1.21.11 by default. When the bot's version is newer than prismarine-viewer supports, both tools fall back to the nearest older version's textures. They report the fallback in their reply text. Blocks or items added after that version can look wrong or be missing.
@@ -100,5 +131,11 @@ Treat these as ground truth. Treat the rendered images as a rough layout check o
 | `MCP_AUTH_TOKEN` | none | Bearer token required by the `http` transport |
 | `CHROMIUM_PATH` | `/usr/bin/chromium` | Browser executable used by `take-screenshot` |
 | `WEB_VIEWER_PORT` | `3007` | Port for the live web viewer |
+| `MCCLI_HOST` | `127.0.0.1` | Host of the real Minecraft client's control socket |
+| `MCCLI_PORT` | `25580` | Port of the real Minecraft client's control socket |
+| `MCCLI_LAUNCH_SCRIPT` | `/app/mc-client/launch-client.sh` | Script `client-*` tools run to launch the real client |
+| `MCCLI_SCREENSHOT_DIR` | `/app/mc-client/screenshots` | Where `client-capture` asks the client to write, then reads and deletes |
+| `MCCLI_SOCKET_TIMEOUT_MS` | `10000` | Timeout for a single socket call to the client |
+| `MCCLI_LAUNCH_TIMEOUT_MS` | `90000` | Timeout for the client to become reachable after launch |
 
 `WEB_VIEWER_PORT` must not equal the MCP HTTP port. `start-viewer` refuses to start and reports the conflict if the two match.

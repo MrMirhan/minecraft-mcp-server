@@ -18,7 +18,13 @@ import { registerStatusTools } from './tools/status-tools.js';
 import { registerCompositeTools } from './tools/composite-tools.js';
 import { registerControlTools } from './tools/control-tools.js';
 import { registerViewerTools } from './tools/viewer-tools.js';
+import { registerClientTools } from './tools/client-tools.js';
 import { ActionManager } from './action-manager.js';
+import { McClient } from './mc-client.js';
+
+// The HTTP transport builds a fresh McpServer per session, but only one real Minecraft
+// client may exist per process: it costs ~2GB and binds a single control port.
+let sharedMcClient: McClient | null = null;
 
 const SERVER_NAME = "minecraft-mcp-server";
 const SERVER_VERSION = "2.0.4";
@@ -76,6 +82,8 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
   registerCompositeTools(factory, getBot, actionManager);
   registerControlTools(factory, getBot, actionManager);
   registerViewerTools(factory, connection);
+  sharedMcClient ??= new McClient();
+  registerClientTools(factory, sharedMcClient);
 
   return server;
 }

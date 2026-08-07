@@ -101,7 +101,7 @@ test.serial('POST /mcp initialize with bearer token succeeds and lists all tools
   t.is(listRes.status, 200);
   const listBody = parseSsePayload(await listRes.text());
   const tools = (listBody as { result: { tools: { name: string }[] } }).result.tools;
-  t.is(tools.length, 45);
+  t.is(tools.length, 60);
 
   const names = tools.map((tool) => tool.name);
   t.true(names.includes('connect-to-server'));

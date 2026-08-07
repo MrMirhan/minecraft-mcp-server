@@ -164,6 +164,23 @@ These tools manage the live web viewer. They work even when the bot is not conne
 - `stop-viewer` - Stop the live web viewer.
 - `get-viewer-url` - Get the live web viewer's URL, if it is running.
 
+### Real Client
+These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected.
+- `client-status` - Check whether the client process is running, whether its socket is reachable, and what is on screen. Never launches the client.
+- `client-capture` - Take a screenshot from the real client, resource packs and all. Optional `clean` hides the HUD. Launches the client on first use.
+- `client-use-item` - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
+- `client-close-screen` - Close any GUI screen open on the client.
+- `client-inventory` - List the client's inventory. Optional `section`, `includeEmpty`, `includeNbt`.
+- `client-item` - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
+- `client-block` - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
+- `client-entity` - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
+- `client-teleport` - Move the client to coordinates. Takes `x`, `y`, `z`.
+- `client-camera` - Set the client's view direction. Takes `yaw`, `pitch`.
+- `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
+- `client-spectate` - Ride another player's view, to capture a screenshot from their viewpoint. Takes optional `player`; call with none to leave spectating.
+- `client-connect` / `client-disconnect` - Connect or disconnect the client from a Minecraft server, independently of the bot.
+- `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch.
+
 ## Live Web Viewer
 
 The live web viewer shows the bot's 3D world in a browser. It overlays the scoreboard, boss bars, the title and action bar, the tab list, and the open window.
@@ -173,6 +190,14 @@ Start the viewer with the `start-viewer` tool. It returns a URL such as `http://
 The viewer attaches to whatever bot is currently connected. It reattaches after `connect-to-server` runs. If the bot disconnects, the viewer shows an empty view.
 
 Set `WEB_VIEWER_PORT` to change the port (default: `3007`). See [GUIDE.md](GUIDE.md) for a known limit on reverse-proxy setups.
+
+## Real Client
+
+`take-screenshot` renders vanilla assets only — no resource packs, holograms, custom models or GUI screens. The `client-*` tools close that gap by driving an actual Minecraft client ([Th0rgal/mc-cli](https://github.com/Th0rgal/mc-cli), NeoForge build) that runs headlessly in the Docker image and exposes a TCP/JSON control socket. It is a second, independent connection to the server — the bot does the automation, the client is the eye.
+
+The client launches lazily, on the first `client-*` tool call that needs it (`client-status` never launches it). The first call after a fresh container start can take up to a minute while the client boots. If the client is not running, its socket is unreachable, or a command times out, the `client-*` tools return a clear text error; they never hang the server, and every other tool keeps working normally regardless of the client's state.
+
+See [GUIDE.md](GUIDE.md) for how the client's lifecycle and error handling work.
 
 ## Running with Docker
 
@@ -189,6 +214,8 @@ docker run --rm -p 3000:3000 \
 The MCP endpoint is then served at `http://HOST:3000/mcp` and protected by the bearer token. `MC_HOST` is left empty by default, so the server starts idle and the agent joins a Minecraft server at runtime via the `connect-to-server` tool.
 
 Two more variables control optional features. `CHROMIUM_PATH` sets the browser used by `take-screenshot` (default: `/usr/bin/chromium`, already set in this image). `WEB_VIEWER_PORT` sets the port for the live web viewer (default: `3007`).
+
+The image also bundles the real Minecraft client the `client-*` tools drive: Java 21, a pinned NeoForge build for Minecraft 1.21.11, the pinned `mccli-neoforge` mod jar, and Xvfb with Mesa software OpenGL (there is no GPU). It runs offline-mode, since a hosted deployment has no premium Microsoft account. `MCCLI_HOST` and `MCCLI_PORT` point at the client's control socket (default: `127.0.0.1:25580`, already correct for this image).
 
 Point an MCP client that supports the Streamable HTTP URL transport at the endpoint, sending the token as an `Authorization` header:
 
