@@ -329,6 +329,27 @@ test.serial('connectTo rejects and cleans up when the bot errors before spawn', 
   }
 });
 
+test.serial('connectTo rejects and resets state when the bot ends before spawn', async (t) => {
+  const config = { host: 'localhost', port: 25565, username: 'TestBot' };
+  const callbacks = { onLog: sinon.stub(), onChatMessage: sinon.stub() };
+  const connection = new BotConnection(config, callbacks);
+
+  const newBot = makeFakeBot();
+  const createBot = sinon.stub(mineflayer, 'createBot').returns(newBot);
+
+  try {
+    const promise = connection.connectTo({ host: 'bad', port: 1, username: 'TestBot' });
+    newBot.emit('end', 'socketClosed');
+
+    await t.throwsAsync(promise, { message: /Failed to connect to bad:1: "socketClosed"/ });
+    t.is(connection.getBot(), null);
+    t.is(connection.getState(), 'disconnected');
+    t.false(connection.isConnected());
+  } finally {
+    createBot.restore();
+  }
+});
+
 test.serial('connectTo rejects on timeout when no spawn occurs', async (t) => {
   const clock = sinon.useFakeTimers();
   const createBot = sinon.stub(mineflayer, 'createBot').returns(makeFakeBot());

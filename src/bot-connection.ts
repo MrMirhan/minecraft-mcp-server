@@ -206,7 +206,9 @@ export class BotConnection {
         settled = true;
         cleanup();
         bot.removeAllListeners();
-        if (this.bot === bot) {
+        // On 'end' the handler from registerEventHandlers runs first and has already nulled
+        // this.bot, so a null here still means the failed attempt is the current one.
+        if (this.bot === bot || this.bot === null) {
           this.bot = null;
           this.state = 'disconnected';
         }
