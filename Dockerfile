@@ -75,10 +75,9 @@ RUN cd node_modules/prismarine-viewer/public/textures \
 # detection only runs when `hmc.check.xvfb` is set (default false) — so launch-client.sh below
 # sets it explicitly every time, not just relying on Xvfb being up.
 #
-# Fabric's mc-cli build only ships 10 of the 20 commands the NeoForge build had: `interact`,
-# `inventory`, `item`, `block`, `entity`, `window` and `resourcepack` are gone. client-* tools
-# whose backend command is missing now surface the mod's own "unknown command" error instead of
-# succeeding — see README.md/GUIDE.md for exactly which tools that affects.
+# mc-cli 1.4.0's Fabric build only shipped 10 of the 20 commands; since 1.5.0 the Fabric
+# 1.21.11 build has all of them again (`interact`, `inventory`, `item`, `block`, `entity`,
+# `window`, `resourcepack` included), so every client-* tool has its backend command.
 #
 # Versions are pinned, not "latest" — a moving HeadlessMC/Fabric Loader/mccli/Fabric API
 # version breaks reproducible builds. Runs offline-mode (fake username/uuid below): the user
@@ -95,8 +94,8 @@ ARG HEADLESSMC_VERSION=2.10.0
 ARG HEADLESSMC_JAR_SHA256=52bd5006f478377b3893011d458562977d38c65ead6d2b31089beb4d614f13cd
 ARG MC_VERSION=1.21.11
 ARG FABRIC_LOADER_VERSION=0.19.3
-ARG MCCLI_VERSION=1.4.0
-ARG MCCLI_FABRIC_JAR_SHA256=f321589cdfc70232191705c9b295c63ce0947a2fa58446b4327921d4a3b745f4
+ARG MCCLI_VERSION=1.6.0
+ARG MCCLI_FABRIC_JAR_SHA256=23323238e6a36ac8036b4f2964f9d7f574081e7db30ae2b62920ca6eeb694cd2
 ARG FABRIC_API_FILENAME=fabric-api-0.141.6+1.21.11.jar
 ARG FABRIC_API_MODRINTH_VERSION=6qAuTtLR
 ARG FABRIC_API_JAR_SHA256=bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f
