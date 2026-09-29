@@ -214,14 +214,14 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
 
   factory.registerTool(
     "client-teleport",
-    "Move the real Minecraft client to specific coordinates",
+    "Teleport the real Minecraft client's player with the server's /tp command (needs the permission on the server; without it, teleport from the server console). A client-side position change is corrected by the server, so this goes through the server.",
     {
       x: z.coerce.number().describe("Target x"),
       y: z.coerce.number().describe("Target y"),
       z: z.coerce.number().describe("Target z")
     },
     async ({ x, y, z }: { x: number; y: number; z: number }) => {
-      const result = await mcClient.request('teleport', { x, y, z });
+      const result = await mcClient.request('execute', { command: `tp ${x} ${y} ${z}` });
       if (!result.ok) {
         return factory.createErrorResponse(result.error);
       }

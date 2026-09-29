@@ -281,13 +281,13 @@ test('client-entity always sends action target', async (t) => {
   t.true((mockClient.request as sinon.SinonStub).calledWith('entity', { action: 'target', max_distance: 8 }));
 });
 
-test('client-teleport sends x, y, z', async (t) => {
+test('client-teleport runs the server /tp command', async (t) => {
   const { mockServer, mockClient } = setup();
   const { executor } = getExecutor(mockServer, 'client-teleport');
 
   await executor({ x: 10, y: 64, z: -20 });
 
-  t.true((mockClient.request as sinon.SinonStub).calledWith('teleport', { x: 10, y: 64, z: -20 }));
+  t.true((mockClient.request as sinon.SinonStub).calledWith('execute', { command: 'tp 10 64 -20' }));
 });
 
 test('client-camera sends yaw and pitch', async (t) => {

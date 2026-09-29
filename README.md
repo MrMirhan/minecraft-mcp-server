@@ -175,7 +175,7 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 - `client-item` - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
 - `client-block` - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
 - `client-entity` - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
-- `client-teleport` - Move the client to coordinates. Takes `x`, `y`, `z`.
+- `client-teleport` - Teleport the client's player with the server's `/tp` (needs that permission on the server; otherwise teleport it from the server console). Takes `x`, `y`, `z`.
 - `client-camera` - Set the client's view direction. Takes `yaw`, `pitch`.
 - `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
 - `client-spectate` - Ride another player's view, to capture a screenshot from their viewpoint. Takes optional `player`; call with none to leave spectating.
