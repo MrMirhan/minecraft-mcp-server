@@ -10,7 +10,8 @@ const TOOL_NAMES = [
   'client-status', 'client-set-username', 'client-capture', 'client-use-item', 'client-close-screen',
   'client-inventory', 'client-item', 'client-block', 'client-entity',
   'client-teleport', 'client-camera', 'client-gamemode', 'client-spectate',
-  'client-connect', 'client-disconnect', 'client-execute'
+  'client-connect', 'client-disconnect', 'client-execute',
+  'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-interact'
 ];
 
 function baseStatus(overrides: Partial<McClientStatus> = {}): McClientStatus {
@@ -87,7 +88,15 @@ test('client-* tools run even when the mineflayer bot is not connected (skipConn
               ? { command: 'say hi' }
               : name === 'client-set-username'
                 ? { username: 'NewName' }
-                : {};
+                : name === 'client-hover'
+                  ? { slot: 0, capture: false }
+                  : name === 'client-slot-click'
+                    ? { slot: 0 }
+                    : name === 'client-key'
+                      ? { key: 'tab' }
+                      : name === 'client-interact'
+                        ? { target: 'block' }
+                        : {};
 
     const result = await executor(args);
     const text = result.content[0].type === 'text' ? result.content[0].text : '';
@@ -378,10 +387,123 @@ test('every client-* tool returns a text error, not a throw, when the client is 
               ? { command: 'say hi' }
               : name === 'client-set-username'
                 ? { username: 'NewName' }
-                : {};
+                : name === 'client-hover'
+                  ? { slot: 0, capture: false }
+                  : name === 'client-slot-click'
+                    ? { slot: 0 }
+                    : name === 'client-key'
+                      ? { key: 'tab' }
+                      : name === 'client-interact'
+                        ? { target: 'block' }
+                        : {};
 
     const result = await executor(args);
     t.true(result.isError, `${name} must mark isError on failure`);
     t.true(result.content[0].text.includes('ECONNREFUSED'), `${name} must surface the underlying error`);
   }
+});
+
+test('client-slots hides empty slots unless asked', async (t) => {
+  const slots = [{ index: 0, item: { empty: false, id: 'minecraft:stone' } }, { index: 1, item: { empty: true } }];
+  const { mockServer, mockClient } = setup({
+    request: sinon.stub().resolves({ ok: true, data: { title: 'Menu', slots } } as McCommandResult)
+  });
+  const { executor } = getExecutor(mockServer, 'client-slots');
+
+  const filtered = JSON.parse((await executor({})).content[0].text);
+  const all = JSON.parse((await executor({ includeEmpty: true })).content[0].text);
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'slots' }));
+  t.deepEqual(filtered.slots.map((slot: { index: number }) => slot.index), [0]);
+  t.is(all.slots.length, 2);
+});
+
+test('client-hover moves to the slot and returns text plus a capture', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-hover');
+
+  const result = await executor({ slot: 13, settleMs: 0 });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'mouse_move', slot: 13 }));
+  t.true((mockClient.captureScreenshot as sinon.SinonStub).calledOnce);
+  t.is(result.content[0].type, 'text');
+  t.is(result.content[1].type, 'image');
+});
+
+test('client-hover needs a slot or both coordinates', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-hover');
+
+  const result = await executor({ x: 10 });
+
+  t.true(result.isError);
+  t.false((mockClient.request as sinon.SinonStub).called);
+});
+
+test('client-click sends the button index and the shift modifier', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-click');
+
+  await executor({ slot: 5, button: 'right', shift: true });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', {
+    action: 'mouse_click', slot: 5, button: 1, modifiers: 1, mode: 'click'
+  }));
+  t.false((mockClient.captureScreenshot as sinon.SinonStub).called);
+});
+
+test('client-slot-click sends slot, button and type', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-slot-click');
+
+  await executor({ slot: 3, type: 'quick_move' });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'slot_click', slot: 3, button: 0, type: 'quick_move' }));
+});
+
+test('client-key hold presses, captures, then releases in that order', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-key');
+
+  const result = await executor({ key: 'tab', mode: 'hold', holdMs: 0 });
+
+  const request = mockClient.request as sinon.SinonStub;
+  const capture = mockClient.captureScreenshot as sinon.SinonStub;
+  t.true(request.firstCall.calledWith('input', { action: 'key', key: 'tab', mode: 'press' }));
+  t.true(request.secondCall.calledWith('input', { action: 'key', key: 'tab', mode: 'release' }));
+  t.true(capture.firstCall.calledAfter(request.firstCall) && capture.firstCall.calledBefore(request.secondCall));
+  t.is(result.content[1].type, 'image');
+});
+
+test('client-key hold releases the key even when the capture fails', async (t) => {
+  const { mockServer, mockClient } = setup({
+    captureScreenshot: sinon.stub().resolves({ ok: false, error: 'no screen' })
+  });
+  const { executor } = getExecutor(mockServer, 'client-key');
+
+  const result = await executor({ key: 'tab', mode: 'hold', holdMs: 0 });
+
+  t.true(result.isError);
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'key', key: 'tab', mode: 'release' }));
+});
+
+test('client-key sends numeric key codes as numbers', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-key');
+
+  await executor({ key: '258' });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'key', key: 258, mode: 'tap' }));
+});
+
+test('client-interact maps block and entity targets to interact actions', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-interact');
+
+  await executor({ target: 'block', x: 1, y: 64, z: -3, face: 'north' });
+  await executor({ target: 'entity', entityId: 42 });
+
+  const request = mockClient.request as sinon.SinonStub;
+  t.true(request.calledWith('interact', { action: 'use_on_block', x: 1, y: 64, z: -3, face: 'north' }));
+  t.true(request.calledWith('interact', { action: 'use_on_entity', entity_id: 42 }));
 });

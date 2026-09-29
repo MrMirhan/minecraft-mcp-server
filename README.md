@@ -180,7 +180,15 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 - `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
 - `client-spectate` - Ride another player's view, to capture a screenshot from their viewpoint. Takes optional `player`; call with none to leave spectating.
 - `client-connect` / `client-disconnect` - Connect or disconnect the client from a Minecraft server, independently of the bot.
-- `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch. GUIs that used to open via `client-use-item` can still be reached this way, by sending the server-side command that opens them.
+- `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch.
+- `client-slots` - List the open container's slots: index, GUI position and centre, item. Optional `includeEmpty`.
+- `client-hover` - Move the mouse over a slot (`slot`) or a GUI point (`x`, `y`) so the game draws the hover highlight and the tooltip, then capture (default). Optional `capture`, `settleMs`.
+- `client-click` - Click like a player on a slot or a GUI point, handled by the screen's own click logic. Optional `button` (left/right/middle), `shift`, `mode` (click/press/release), `capture`, `settleMs`.
+- `client-slot-click` - Send a container click for a slot directly: `type` pickup, quick_move, swap (with `button` = hotbar index), clone, throw, quick_craft, pickup_all.
+- `client-key` - Press a key (`tab`, `f3`, `escape`, `e`, … or a GLFW code): `mode` tap, press, release, or hold (press, wait `holdMs`, capture, release) for the player list or the debug screen.
+- `client-interact` - Right-click a block (`x`, `y`, `z`, `face`) or an entity (`entityId`), or whatever the client looks at.
+
+The last six need mc-cli's `input` command (mouse, keys and slots), which is not in an upstream mc-cli release yet; the image must be built with an mc-cli jar that has it (see [GUIDE.md](GUIDE.md)). Without it they answer `Unknown command: input`, and every other tool keeps working.
 
 ## Live Web Viewer
 

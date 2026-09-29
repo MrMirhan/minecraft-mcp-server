@@ -10,6 +10,24 @@ function imageResponse(buffer: Buffer): ToolResponse {
   } as unknown as ToolResponse;
 }
 
+const MOUSE_BUTTONS = { left: 0, right: 1, middle: 2 } as const;
+const GLFW_MOD_SHIFT = 1;
+const SLOT_CLICK_TYPES = ['pickup', 'quick_move', 'swap', 'clone', 'throw', 'quick_craft', 'pickup_all'] as const;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pointParams(slot: number | undefined, x: number | undefined, y: number | undefined): Record<string, number> | null {
+  if (slot !== undefined) {
+    return { slot };
+  }
+  if (x !== undefined && y !== undefined) {
+    return { x, y };
+  }
+  return null;
+}
+
 function formatStatus(status: Awaited<ReturnType<McClient['getStatus']>>): string {
   const lines = [
     `Process: ${status.processState}`,
@@ -324,6 +342,178 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
     },
     async ({ command }: { command: string }) => {
       const result = await mcClient.request('execute', { command });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  async function captureAfter(settleMs: number, text: string): Promise<ToolResponse> {
+    await sleep(settleMs);
+    const shot = await mcClient.captureScreenshot(false);
+    if (!shot.ok) {
+      return factory.createErrorResponse(`${text}\nThe capture failed: ${shot.error}`);
+    }
+    return {
+      content: [
+        { type: "text", text },
+        { type: "image", data: shot.buffer.toString('base64'), mimeType: "image/png" }
+      ]
+    } as unknown as ToolResponse;
+  }
+
+  factory.registerTool(
+    "client-slots",
+    "List the slots of the container screen open on the real client (a chest menu, the player inventory, a furnace): each slot's index, GUI position and centre, and item. Use the index with client-hover, client-click or client-slot-click.",
+    {
+      includeEmpty: z.boolean().optional().describe("Also list empty slots (default: false)")
+    },
+    async ({ includeEmpty = false }: { includeEmpty?: boolean }) => {
+      const result = await mcClient.request('input', { action: 'slots' });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      const data = result.data as Record<string, unknown> & { slots?: Array<{ item?: { empty?: boolean } }> };
+      const slots = (data.slots ?? []).filter((slot) => includeEmpty || !slot.item?.empty);
+      return factory.createResponse(JSON.stringify({ ...data, slots }));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-hover",
+    "Move the real client's mouse over a container slot or a GUI point, so the game draws the slot highlight and the item's tooltip, then capture the screen (default). GUI coordinates are window pixels divided by the GUI scale.",
+    {
+      slot: z.coerce.number().int().optional().describe("Slot index from client-slots"),
+      x: z.coerce.number().optional().describe("GUI x, when no slot is given"),
+      y: z.coerce.number().optional().describe("GUI y, when no slot is given"),
+      capture: z.boolean().optional().describe("Capture the screen after moving (default: true)"),
+      settleMs: z.coerce.number().int().min(0).max(5000).optional().describe("Wait before the capture so the tooltip is drawn (default: 150)")
+    },
+    async ({ slot, x, y, capture = true, settleMs = 150 }: { slot?: number; x?: number; y?: number; capture?: boolean; settleMs?: number }) => {
+      const point = pointParams(slot, x, y);
+      if (!point) {
+        return factory.createErrorResponse('Give a slot index, or both x and y');
+      }
+      const result = await mcClient.request('input', { action: 'mouse_move', ...point });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      const text = JSON.stringify(result.data);
+      return capture ? captureAfter(settleMs, text) : factory.createResponse(text);
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-click",
+    "Click with the real client's mouse the way a player does: on a container slot or a GUI point, handled by the open screen's own click logic (menu buttons, slot pickup, shift-click quick move). Without a slot or point it clicks where the cursor already is.",
+    {
+      slot: z.coerce.number().int().optional().describe("Slot index from client-slots"),
+      x: z.coerce.number().optional().describe("GUI x, when no slot is given"),
+      y: z.coerce.number().optional().describe("GUI y, when no slot is given"),
+      button: z.enum(['left', 'right', 'middle']).optional().describe("Mouse button (default: left)"),
+      shift: z.boolean().optional().describe("Hold shift during the click (quick move in containers)"),
+      mode: z.enum(['click', 'press', 'release']).optional().describe("click (default), or only press / release for drags"),
+      capture: z.boolean().optional().describe("Capture the screen after the click (default: false)"),
+      settleMs: z.coerce.number().int().min(0).max(5000).optional().describe("Wait before the capture, for the server to answer (default: 300)")
+    },
+    async ({ slot, x, y, button = 'left', shift = false, mode = 'click', capture = false, settleMs = 300 }: {
+      slot?: number; x?: number; y?: number; button?: 'left' | 'right' | 'middle'; shift?: boolean;
+      mode?: 'click' | 'press' | 'release'; capture?: boolean; settleMs?: number;
+    }) => {
+      const point = pointParams(slot, x, y) ?? {};
+      const result = await mcClient.request('input', {
+        action: 'mouse_click', ...point, button: MOUSE_BUTTONS[button], modifiers: shift ? GLFW_MOD_SHIFT : 0, mode
+      });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      const text = JSON.stringify(result.data);
+      return capture ? captureAfter(settleMs, text) : factory.createResponse(text);
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-slot-click",
+    "Send a container click for a slot directly (no cursor movement), like the game's own slot click: pickup, quick_move (shift-click), swap with a hotbar key (button = hotbar index 0-8, 40 = offhand), clone, throw, quick_craft or pickup_all. Slot -999 clicks outside the window.",
+    {
+      slot: z.coerce.number().int().describe("Slot index from client-slots, or -999"),
+      button: z.coerce.number().int().min(0).max(40).optional().describe("Mouse button or hotbar index for swap (default: 0)"),
+      type: z.enum(SLOT_CLICK_TYPES).optional().describe("Click type (default: pickup)")
+    },
+    async ({ slot, button = 0, type = 'pickup' }: { slot: number; button?: number; type?: typeof SLOT_CLICK_TYPES[number] }) => {
+      const result = await mcClient.request('input', { action: 'slot_click', slot, button, type });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-key",
+    "Press a key on the real client like a player: tap it, press or release it, or hold it and capture while it is down (Tab shows the player list, F3 the debug screen, Escape closes a menu, E opens the inventory).",
+    {
+      key: z.string().describe("Key name (tab, f3, escape, e, enter, space, left.shift, a-z, 0-9) or a GLFW key code"),
+      mode: z.enum(['tap', 'press', 'release', 'hold']).optional().describe("tap (default), press, release, or hold: press, wait holdMs, capture, release"),
+      holdMs: z.coerce.number().int().min(0).max(10000).optional().describe("How long to hold before the capture in hold mode (default: 300)"),
+      capture: z.boolean().optional().describe("Capture the screen afterwards (default: true for hold, false otherwise)")
+    },
+    async ({ key, mode = 'tap', holdMs = 300, capture }: { key: string; mode?: 'tap' | 'press' | 'release' | 'hold'; holdMs?: number; capture?: boolean }) => {
+      const keyParam = /^\d+$/.test(key.trim()) ? Number(key.trim()) : key;
+      const shouldCapture = capture ?? mode === 'hold';
+      if (mode !== 'hold') {
+        const result = await mcClient.request('input', { action: 'key', key: keyParam, mode });
+        if (!result.ok) {
+          return factory.createErrorResponse(result.error);
+        }
+        const text = JSON.stringify(result.data);
+        return shouldCapture ? captureAfter(150, text) : factory.createResponse(text);
+      }
+      const pressed = await mcClient.request('input', { action: 'key', key: keyParam, mode: 'press' });
+      if (!pressed.ok) {
+        return factory.createErrorResponse(pressed.error);
+      }
+      let response: ToolResponse;
+      try {
+        const text = JSON.stringify(pressed.data);
+        response = shouldCapture ? await captureAfter(holdMs, text) : (await sleep(holdMs), factory.createResponse(text));
+      } finally {
+        await mcClient.request('input', { action: 'key', key: keyParam, mode: 'release' });
+      }
+      return response;
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-interact",
+    "Right-click a block or an entity with the real client, like a player: opens a chest or a crafting table, talks to an NPC, uses the held item on the target. Without coordinates or an entity id it uses what the client is looking at.",
+    {
+      target: z.enum(['block', 'entity']).describe("What to right-click"),
+      x: z.coerce.number().int().optional().describe("Block x (block target)"),
+      y: z.coerce.number().int().optional().describe("Block y (block target)"),
+      z: z.coerce.number().int().optional().describe("Block z (block target)"),
+      face: z.enum(['up', 'down', 'north', 'south', 'east', 'west']).optional().describe("Block face to click (default: up)"),
+      entityId: z.coerce.number().int().optional().describe("Entity id (entity target); see client-entity"),
+      hand: z.enum(['main', 'off']).optional().describe("Hand to use (default: main)")
+    },
+    async ({ target, x, y, z: bz, face, entityId, hand }: {
+      target: 'block' | 'entity'; x?: number; y?: number; z?: number; face?: string; entityId?: number; hand?: 'main' | 'off';
+    }) => {
+      const params: Record<string, unknown> = { action: target === 'block' ? 'use_on_block' : 'use_on_entity' };
+      if (target === 'block' && x !== undefined && y !== undefined && bz !== undefined) {
+        Object.assign(params, { x, y, z: bz });
+      }
+      if (face) params.face = face;
+      if (target === 'entity' && entityId !== undefined) params.entity_id = entityId;
+      if (hand) params.hand = hand;
+      const result = await mcClient.request('interact', params);
       if (!result.ok) {
         return factory.createErrorResponse(result.error);
       }

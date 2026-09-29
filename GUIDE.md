@@ -88,6 +88,12 @@ mc-cli 1.4.0's Fabric build shipped only 10 of its 20 commands (`interact`, `inv
 
 This is a second, independent connection to the Minecraft server. The bot (`BotConnection`, mineflayer) and the client are unrelated processes with unrelated failure modes — a dead client never affects the bot's 45 tools, and a dead bot never affects the `client-*` tools. All `client-*` tools set `skipConnectionCheck`, so they work even when the bot is not connected.
 
+### GUI input: hover, click, keys
+
+`client-slots`, `client-hover`, `client-click`, `client-slot-click` and `client-key` send mc-cli's `input` command, which calls the client's own GLFW input callbacks (`Mouse.onCursorPos`/`onMouseButton`, `Keyboard.onKey`) through mixin invokers. That is the path a real mouse and keyboard take, so a hovered slot draws its real tooltip, a click goes through the open screen's click handling, and a held Tab key shows the player list for as long as it is down. Coordinates are GUI coordinates (window pixels divided by the GUI scale); `input slots` gives every slot's GUI centre, so tools can address slots by index. `client-slot-click` sends `clickSlot` directly for the cases a cursor cannot express (hotbar swap, throw, clone). `client-interact` uses mc-cli's existing `interact` actions `use_on_block` and `use_on_entity`.
+
+The `input` command lives on the `feat/gui-input` branch of the mc-cli fork until upstream ships it; the image needs that jar (`MCCLI_*` build args).
+
 ### Lifecycle: lazy launch
 
 The client process is not started at container boot, and starting it is not part of the MCP server's own health check. It launches lazily, the first time a `client-*` tool other than `client-status` calls `McClient.request()`. This mirrors the bot's own idle-by-default behavior (`MC_HOST` empty until `connect-to-server` runs): a deployment that never uses the `client-*` tools never pays the client's ~2GB RAM and 30-60s startup cost. The tradeoff is that the first `client-capture` or similar call after a fresh start is slow while the client boots; `client-status` never triggers a launch, so polling status is always cheap.
