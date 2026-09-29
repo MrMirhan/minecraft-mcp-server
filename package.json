@@ -12,7 +12,8 @@
     ],
     "nodeArguments": [
       "--import=tsx"
-    ]
+    ],
+    "workerThreads": false
   },
   "scripts": {
     "dev": "tsx src/main.ts",
