@@ -165,16 +165,16 @@ These tools manage the live web viewer. They work even when the bot is not conne
 - `get-viewer-url` - Get the live web viewer's URL, if it is running.
 
 ### Real Client
-These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected. The client runs a Fabric build of the mod ([why](#real-client-1)), which drops several backend commands the previous NeoForge build had. The six tools marked **(not on Fabric)** below call one of those dropped commands and return the mod's own "Unknown command" error instead of succeeding — everything else works normally.
-- `client-status` - Check whether the client process is running, whether its socket is reachable, its current username, and what is on screen. Never launches the client. The "what is on screen" part needs the dropped `window` command, so it is always omitted now; process/socket status is unaffected.
+These tools drive a real Minecraft client (see [Real Client](#real-client-1) below), a separate connection from the bot. They work even when the bot is not connected. The client runs a Fabric build of the mod ([why](#real-client-1)); since mc-cli 1.5.0 that build has every backend command the tools below use.
+- `client-status` - Check whether the client process is running, whether its socket is reachable, its current username, and what is on screen. Never launches the client.
 - `client-set-username` - Change the client's in-game username, deriving the matching offline UUID the way a server would. Restarts the client if it is currently running (the response says so); otherwise the value applies on the next launch.
 - `client-capture` - Take a screenshot from the real client, resource packs and all. Optional `clean` hides the HUD. Launches the client on first use.
-- `client-use-item` **(not on Fabric)** - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
-- `client-close-screen` **(not on Fabric)** - Close any GUI screen open on the client.
-- `client-inventory` **(not on Fabric)** - List the client's inventory. Optional `section`, `includeEmpty`, `includeNbt`.
-- `client-item` **(not on Fabric)** - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
-- `client-block` **(not on Fabric)** - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
-- `client-entity` **(not on Fabric)** - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
+- `client-use-item` - Right-click with the client's held item, the verb that opens hub menus. Optional `hand`.
+- `client-close-screen` - Close any GUI screen open on the client.
+- `client-inventory` - List the client's inventory. Optional `section`, `includeEmpty`, `includeNbt`.
+- `client-item` - Inspect the client's held item or a specific slot. Optional `action`, `hand`, `slot`, `includeNbt`.
+- `client-block` - Probe the targeted block or one at specific coordinates. Optional `action`, `maxDistance`, `x`, `y`, `z`, `includeNbt`.
+- `client-entity` - Probe the entity the client is looking at. Optional `maxDistance`, `includeNbt`.
 - `client-teleport` - Move the client to coordinates. Takes `x`, `y`, `z`.
 - `client-camera` - Set the client's view direction. Takes `yaw`, `pitch`.
 - `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
@@ -196,7 +196,7 @@ Set `WEB_VIEWER_PORT` to change the port (default: `3007`). See [GUIDE.md](GUIDE
 
 `take-screenshot` renders vanilla assets only — no resource packs, holograms, custom models or GUI screens. The `client-*` tools close that gap by driving an actual Minecraft client ([Th0rgal/mc-cli](https://github.com/Th0rgal/mc-cli), Fabric build) that runs headlessly in the Docker image and exposes a TCP/JSON control socket. It is a second, independent connection to the server — the bot does the automation, the client is the eye.
 
-The client is launched by [HeadlessMC](https://github.com/headlesshq/headlessmc), a real Minecraft launcher, rather than a hand-built classpath — see [GUIDE.md](GUIDE.md) for why. Fabric's mc-cli build has fewer backend commands than the NeoForge build this image used to run; see the tool list above for exactly which `client-*` tools that affects.
+The client is launched by [HeadlessMC](https://github.com/headlesshq/headlessmc), a real Minecraft launcher, rather than a hand-built classpath — see [GUIDE.md](GUIDE.md) for why.
 
 The client launches lazily, on the first `client-*` tool call that needs it (`client-status` never launches it). The first call after a fresh container start can take up to a minute while the client boots. If the client is not running, its socket is unreachable, or a command times out, the `client-*` tools return a clear text error; they never hang the server, and every other tool keeps working normally regardless of the client's state.
 
