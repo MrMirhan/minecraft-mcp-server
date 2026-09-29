@@ -84,7 +84,7 @@ Real rendering still happens under Xvfb + llvmpipe software OpenGL, the same as 
 
 Xvfb runs at 1280x720x24. `launch-client.sh` sets `fullscreen:true` and `guiScale:2` in `options.txt` on every launch, before starting the game, rather than seeding the file once at build time — `options.txt` does not exist until Minecraft's own first run creates it, so a build-time seed would depend on unverified assumptions about whether that first run preserves or overwrites it. Applying the settings idempotently on every launch (upsert by key, not append) sidesteps that risk entirely and self-heals if anything ever resets them. `fullscreen:true` makes the game window fill the full Xvfb screen instead of the 854x480 windowed default, confirmed live in a scoped container by checking a captured screenshot's pixel dimensions.
 
-mc-cli 1.4.0's Fabric build shipped only 10 of its 20 commands (`interact`, `inventory`, `item`, `block`, `entity`, `window` and `resourcepack` were missing, so six `client-*` tools answered `Unknown command`). mc-cli 1.5.0 brought every command to Fabric 1.21.11; the image pins 1.6.0. `client-teleport` goes through the server's `/tp` because mc-cli's `teleport` only moves the player client-side, which the server corrects on the next movement packet.
+mc-cli 1.4.0's Fabric build shipped only 10 of its 20 commands (`interact`, `inventory`, `item`, `block`, `entity`, `window` and `resourcepack` were missing, so six `client-*` tools answered `Unknown command`). mc-cli 1.5.0 brought every command to Fabric 1.21.11; the image pins 1.6.0 (as the fork build 1.6.0-input.1, below). `client-teleport` goes through the server's `/tp` because mc-cli's `teleport` only moves the player client-side, which the server corrects on the next movement packet.
 
 This is a second, independent connection to the Minecraft server. The bot (`BotConnection`, mineflayer) and the client are unrelated processes with unrelated failure modes — a dead client never affects the bot's 45 tools, and a dead bot never affects the `client-*` tools. All `client-*` tools set `skipConnectionCheck`, so they work even when the bot is not connected.
 
@@ -92,7 +92,7 @@ This is a second, independent connection to the Minecraft server. The bot (`BotC
 
 `client-slots`, `client-hover`, `client-click`, `client-slot-click` and `client-key` send mc-cli's `input` command, which calls the client's own GLFW input callbacks (`Mouse.onCursorPos`/`onMouseButton`, `Keyboard.onKey`) through mixin invokers. That is the path a real mouse and keyboard take, so a hovered slot draws its real tooltip, a click goes through the open screen's click handling, and a held Tab key shows the player list for as long as it is down. Coordinates are GUI coordinates (window pixels divided by the GUI scale); `input slots` gives every slot's GUI centre, so tools can address slots by index. `client-slot-click` sends `clickSlot` directly for the cases a cursor cannot express (hotbar swap, throw, clone). `client-interact` uses mc-cli's existing `interact` actions `use_on_block` and `use_on_entity`.
 
-The `input` command lives on the `feat/gui-input` branch of the mc-cli fork until upstream ships it; the image needs that jar (`MCCLI_*` build args).
+The `input` command lives on the `feat/gui-input` branch of the MrMirhan/mc-cli fork until upstream ships it. The image pins that fork's release 1.6.0-input.1 (`MCCLI_REPO`, `MCCLI_VERSION`, `MCCLI_FABRIC_JAR_SHA256` build args); set them back to `Th0rgal/mc-cli` once upstream has the command.
 
 ### Lifecycle: lazy launch
 

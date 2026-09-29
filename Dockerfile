@@ -47,7 +47,7 @@ RUN cd node_modules/prismarine-viewer/public/textures \
          case "$entry" in 1.21.4|1.21.4.png|1.21.1|1.21.1.png|1.20.1|1.20.1.png) ;; *) rm -rf "$entry" ;; esac; \
        done
 
-# --- Real Minecraft client (HeadlessMC launcher + Th0rgal/mc-cli, Fabric build) ---
+# --- Real Minecraft client (HeadlessMC launcher + mc-cli from the MrMirhan fork, Fabric build) ---
 # A second eye on the world: mineflayer/prismarine-viewer draw vanilla assets only, so
 # holograms, resource packs, custom models and GUI screens are invisible to them. This runs
 # an actual Fabric Minecraft client headlessly (Xvfb + Mesa software OpenGL, no GPU) and talks
@@ -78,6 +78,9 @@ RUN cd node_modules/prismarine-viewer/public/textures \
 # mc-cli 1.4.0's Fabric build only shipped 10 of the 20 commands; since 1.5.0 the Fabric
 # 1.21.11 build has all of them again (`interact`, `inventory`, `item`, `block`, `entity`,
 # `window`, `resourcepack` included), so every client-* tool has its backend command.
+# client-slots/hover/click/slot-click/key also need an `input` command that upstream
+# Th0rgal/mc-cli does not have; the MrMirhan/mc-cli fork release 1.6.0-input.1 adds it
+# (branch feat/gui-input) and is otherwise upstream 1.6.0.
 #
 # Versions are pinned, not "latest" — a moving HeadlessMC/Fabric Loader/mccli/Fabric API
 # version breaks reproducible builds. Runs offline-mode (fake username/uuid below): the user
@@ -94,8 +97,9 @@ ARG HEADLESSMC_VERSION=2.10.0
 ARG HEADLESSMC_JAR_SHA256=52bd5006f478377b3893011d458562977d38c65ead6d2b31089beb4d614f13cd
 ARG MC_VERSION=1.21.11
 ARG FABRIC_LOADER_VERSION=0.19.3
-ARG MCCLI_VERSION=1.6.0
-ARG MCCLI_FABRIC_JAR_SHA256=23323238e6a36ac8036b4f2964f9d7f574081e7db30ae2b62920ca6eeb694cd2
+ARG MCCLI_REPO=MrMirhan/mc-cli
+ARG MCCLI_VERSION=1.6.0-input.1
+ARG MCCLI_FABRIC_JAR_SHA256=ad6ad9a358ebe7be4e9656889626abb5049a8e5d69f3480f9410328a15895771
 ARG FABRIC_API_FILENAME=fabric-api-0.141.6+1.21.11.jar
 ARG FABRIC_API_MODRINTH_VERSION=6qAuTtLR
 ARG FABRIC_API_JAR_SHA256=bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f
@@ -113,7 +117,7 @@ RUN mkdir -p "${MC_CLIENT_DIR}/game/mods" "${MCCLI_SCREENSHOT_DIR}" \
          "https://github.com/headlesshq/headlessmc/releases/download/${HEADLESSMC_VERSION}/headlessmc-launcher-${HEADLESSMC_VERSION}.jar" \
     && echo "${HEADLESSMC_JAR_SHA256}  ${MC_CLIENT_DIR}/headlessmc-launcher.jar" | sha256sum -c - \
     && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" \
-         "https://github.com/Th0rgal/mc-cli/releases/download/v${MCCLI_VERSION}/mccli-fabric-${MCCLI_VERSION}.jar" \
+         "https://github.com/${MCCLI_REPO}/releases/download/v${MCCLI_VERSION}/mccli-fabric-${MCCLI_VERSION}.jar" \
     && echo "${MCCLI_FABRIC_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" | sha256sum -c - \
     && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" \
          "https://cdn.modrinth.com/data/P7dR8mSH/versions/${FABRIC_API_MODRINTH_VERSION}/${FABRIC_API_FILENAME}" \
