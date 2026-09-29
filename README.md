@@ -188,7 +188,7 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 - `client-key` - Press a key (`tab`, `f3`, `escape`, `e`, … or a GLFW code): `mode` tap, press, release, or hold (press, wait `holdMs`, capture, release) for the player list or the debug screen.
 - `client-interact` - Right-click a block (`x`, `y`, `z`, `face`) or an entity (`entityId`), or whatever the client looks at.
 
-The last six need mc-cli's `input` command (mouse, keys and slots), which is not in an upstream mc-cli release yet; the image must be built with an mc-cli jar that has it (see [GUIDE.md](GUIDE.md)). Without it they answer `Unknown command: input`, and every other tool keeps working.
+`client-slots`, `client-hover`, `client-click`, `client-slot-click` and `client-key` need mc-cli's `input` command (mouse, keys and slots), which is not in an upstream mc-cli release yet. The image pins the [MrMirhan/mc-cli](https://github.com/MrMirhan/mc-cli/releases/tag/v1.6.0-input.1) fork release 1.6.0-input.1, which adds it (see [GUIDE.md](GUIDE.md)). With an upstream mc-cli jar these five answer `Unknown command: input`, and every other tool keeps working.
 
 ## Live Web Viewer
 
