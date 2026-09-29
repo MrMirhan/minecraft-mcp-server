@@ -228,6 +228,8 @@ Two more variables control optional features. `CHROMIUM_PATH` sets the browser u
 
 The image also bundles the real Minecraft client the `client-*` tools drive: Java 21, [HeadlessMC](https://github.com/headlesshq/headlessmc) as the launcher, a pinned Fabric Loader build for Minecraft 1.21.11, the pinned `mccli-fabric` and Fabric API mod jars, and Xvfb with Mesa software OpenGL (there is no GPU). It runs offline-mode, since a hosted deployment has no premium Microsoft account. `MCCLI_HOST` and `MCCLI_PORT` point at the client's control socket (default: `127.0.0.1:25580`, already correct for this image).
 
+A second image tag, `ghcr.io/mrmirhan/minecraft-mcp-server:mc26.2`, runs the Minecraft 26.2 client instead: Java 25, Fabric Loader 0.19.5, Fabric API 0.161.0+26.2, the mc-cli fork build `mccli-fabric-26.2-1.6.0-input.2`, and GeyserMC [Rainbow](https://github.com/GeyserMC/Rainbow) 0.2.1, a client mod that generates Geyser custom item and block mappings plus a Bedrock resource pack from the items it sees (`/rainbow create`, `/rainbow map`, `/rainbow finish`; the output goes to `.minecraft/rainbow/<name>/`). Use it for 26.2 servers. `:latest` stays on 1.21.11. The build arguments of both variants are in `.github/workflows/docker-publish.yml`.
+
 Point an MCP client that supports the Streamable HTTP URL transport at the endpoint, sending the token as an `Authorization` header:
 
 ```json
