@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # Debian bookworm's own apt repos only ship OpenJDK 17; the real Minecraft client needs
-# Java 21+, so the JRE is copied from Temurin's image instead of adding a third-party apt repo.
-FROM eclipse-temurin:21-jre-jammy AS java21
+# Java 21 (1.21.x) or Java 25 (26.x), so the JRE is copied from Temurin's image instead of adding
+# a third-party apt repo. The 26.2 image variant passes JAVA_IMAGE=eclipse-temurin:25-jre-jammy.
+ARG JAVA_IMAGE=eclipse-temurin:21-jre-jammy
+FROM ${JAVA_IMAGE} AS java
 
 # --- Stage 1: build ---
 FROM node:22-bookworm-slim AS builder
@@ -89,7 +91,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 x11-xserver-utils procps curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=java21 /opt/java/openjdk /opt/java/openjdk
+COPY --from=java /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
@@ -99,10 +101,15 @@ ARG MC_VERSION=1.21.11
 ARG FABRIC_LOADER_VERSION=0.19.3
 ARG MCCLI_REPO=MrMirhan/mc-cli
 ARG MCCLI_VERSION=1.6.0-input.1
+ARG MCCLI_FABRIC_JAR=mccli-fabric-${MCCLI_VERSION}.jar
 ARG MCCLI_FABRIC_JAR_SHA256=ad6ad9a358ebe7be4e9656889626abb5049a8e5d69f3480f9410328a15895771
 ARG FABRIC_API_FILENAME=fabric-api-0.141.6+1.21.11.jar
 ARG FABRIC_API_MODRINTH_VERSION=6qAuTtLR
 ARG FABRIC_API_JAR_SHA256=bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f
+# Optional extra client mod, e.g. GeyserMC Rainbow in the 26.2 variant; empty = none.
+ARG EXTRA_MOD_URL=
+ARG EXTRA_MOD_FILE=
+ARG EXTRA_MOD_SHA256=
 ENV MC_CLIENT_DIR=/app/mc-client
 ENV MCCLI_LAUNCH_SCRIPT=${MC_CLIENT_DIR}/launch-client.sh
 ENV MCCLI_SCREENSHOT_DIR=${MC_CLIENT_DIR}/screenshots
@@ -116,12 +123,16 @@ RUN mkdir -p "${MC_CLIENT_DIR}/game/mods" "${MCCLI_SCREENSHOT_DIR}" \
     && curl -fsSL -o "${MC_CLIENT_DIR}/headlessmc-launcher.jar" \
          "https://github.com/headlesshq/headlessmc/releases/download/${HEADLESSMC_VERSION}/headlessmc-launcher-${HEADLESSMC_VERSION}.jar" \
     && echo "${HEADLESSMC_JAR_SHA256}  ${MC_CLIENT_DIR}/headlessmc-launcher.jar" | sha256sum -c - \
-    && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" \
-         "https://github.com/${MCCLI_REPO}/releases/download/v${MCCLI_VERSION}/mccli-fabric-${MCCLI_VERSION}.jar" \
-    && echo "${MCCLI_FABRIC_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/mccli-fabric-${MCCLI_VERSION}.jar" | sha256sum -c - \
+    && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${MCCLI_FABRIC_JAR}" \
+         "https://github.com/${MCCLI_REPO}/releases/download/v${MCCLI_VERSION}/${MCCLI_FABRIC_JAR}" \
+    && echo "${MCCLI_FABRIC_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/${MCCLI_FABRIC_JAR}" | sha256sum -c - \
     && curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" \
          "https://cdn.modrinth.com/data/P7dR8mSH/versions/${FABRIC_API_MODRINTH_VERSION}/${FABRIC_API_FILENAME}" \
-    && echo "${FABRIC_API_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" | sha256sum -c -
+    && echo "${FABRIC_API_JAR_SHA256}  ${MC_CLIENT_DIR}/game/mods/${FABRIC_API_FILENAME}" | sha256sum -c - \
+    && if [ -n "${EXTRA_MOD_URL}" ]; then \
+         curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${EXTRA_MOD_FILE}" "${EXTRA_MOD_URL}" \
+         && echo "${EXTRA_MOD_SHA256}  ${MC_CLIENT_DIR}/game/mods/${EXTRA_MOD_FILE}" | sha256sum -c - ; \
+       fi
 
 # 2. Install Fabric Loader for MC_VERSION. HeadlessMC always keeps the shared library/version/
 #    asset cache at "${user.home}/.minecraft" — `hmc.gamedir` does not relocate it, it only
