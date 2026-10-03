@@ -492,6 +492,33 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
   );
 
   factory.registerTool(
+    "client-type",
+    "Type text into the real client's open screen like a player: chat (open it with client-key t first), a sign editor, an anvil name field, a book, any text box. Sends one character per code point; use enter to submit chat or move to the next sign line, and client-key for backspace or arrows.",
+    {
+      text: z.string().describe("Text to type"),
+      enter: z.boolean().optional().describe("Press Enter after typing (default: false)"),
+      capture: z.boolean().optional().describe("Capture the screen afterwards (default: false)")
+    },
+    async ({ text, enter = false, capture = false }: { text: string; enter?: boolean; capture?: boolean }) => {
+      const typed = await mcClient.request('input', { action: 'type', text });
+      if (!typed.ok) {
+        return factory.createErrorResponse(typed.error);
+      }
+      let data: Record<string, unknown> = typed.data;
+      if (enter) {
+        const pressed = await mcClient.request('input', { action: 'key', key: 'enter', mode: 'tap' });
+        if (!pressed.ok) {
+          return factory.createErrorResponse(`${JSON.stringify(typed.data)}\nEnter failed: ${pressed.error}`);
+        }
+        data = { ...typed.data, enter: pressed.data };
+      }
+      const responseText = JSON.stringify(data);
+      return capture ? captureAfter(150, responseText) : factory.createResponse(responseText);
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
     "client-interact",
     "Right-click a block or an entity with the real client, like a player: opens a chest or a crafting table, talks to an NPC, uses the held item on the target. Without coordinates or an entity id it uses what the client is looking at.",
     {

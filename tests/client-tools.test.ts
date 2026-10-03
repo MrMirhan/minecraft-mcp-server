@@ -11,7 +11,7 @@ const TOOL_NAMES = [
   'client-inventory', 'client-item', 'client-block', 'client-entity',
   'client-teleport', 'client-camera', 'client-gamemode', 'client-spectate',
   'client-connect', 'client-disconnect', 'client-execute',
-  'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-interact'
+  'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-type', 'client-interact'
 ];
 
 function baseStatus(overrides: Partial<McClientStatus> = {}): McClientStatus {
@@ -94,6 +94,8 @@ test('client-* tools run even when the mineflayer bot is not connected (skipConn
                     ? { slot: 0 }
                     : name === 'client-key'
                       ? { key: 'tab' }
+                      : name === 'client-type'
+                        ? { text: 'hi' }
                       : name === 'client-interact'
                         ? { target: 'block' }
                         : {};
@@ -393,6 +395,8 @@ test('every client-* tool returns a text error, not a throw, when the client is 
                     ? { slot: 0 }
                     : name === 'client-key'
                       ? { key: 'tab' }
+                      : name === 'client-type'
+                        ? { text: 'hi' }
                       : name === 'client-interact'
                         ? { target: 'block' }
                         : {};
@@ -494,6 +498,41 @@ test('client-key sends numeric key codes as numbers', async (t) => {
   await executor({ key: '258' });
 
   t.true((mockClient.request as sinon.SinonStub).calledWith('input', { action: 'key', key: 258, mode: 'tap' }));
+});
+
+test('client-type sends the text as one type action and presses nothing without enter', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-type');
+
+  await executor({ text: 'wheat' });
+
+  const request = mockClient.request as sinon.SinonStub;
+  t.true(request.calledOnceWith('input', { action: 'type', text: 'wheat' }));
+  t.false((mockClient.captureScreenshot as sinon.SinonStub).called);
+});
+
+test('client-type with enter types first, then taps enter', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-type');
+
+  const result = await executor({ text: '/spawn', enter: true, capture: true });
+
+  const request = mockClient.request as sinon.SinonStub;
+  t.true(request.firstCall.calledWith('input', { action: 'type', text: '/spawn' }));
+  t.true(request.secondCall.calledWith('input', { action: 'key', key: 'enter', mode: 'tap' }));
+  t.is(result.content[1].type, 'image');
+});
+
+test('client-type does not press enter when typing fails', async (t) => {
+  const { mockServer, mockClient } = setup({
+    request: sinon.stub().resolves({ ok: false, error: 'No screen is open to type into' } as McCommandResult)
+  });
+  const { executor } = getExecutor(mockServer, 'client-type');
+
+  const result = await executor({ text: 'hi', enter: true });
+
+  t.true(result.isError);
+  t.true((mockClient.request as sinon.SinonStub).calledOnce);
 });
 
 test('client-interact maps block and entity targets to interact actions', async (t) => {
