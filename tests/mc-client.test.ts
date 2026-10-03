@@ -406,6 +406,47 @@ test('setUsername kills the running process and relaunches it with the new usern
   await close();
 });
 
+test('setUsername stops the whole process group, so the game under the launch script cannot outlive it', async (t) => {
+  const { port, close } = await startFakeServer((req, socket) => {
+    reply(socket, { id: req.id, success: true, data: {} });
+  });
+
+  const children: ChildProcess[] = [];
+  const spawnOptions: SpawnOptions[] = [];
+  const spawnFn = (_command: string, _args: readonly string[], options: SpawnOptions) => {
+    spawnOptions.push(options);
+    const child = new EventEmitter() as unknown as ChildProcess;
+    Object.assign(child, { pid: 1000 + children.length, stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+    children.push(child);
+    return child;
+  };
+  const groupSignals: Array<[number, 'SIGTERM' | 'SIGKILL' | 0]> = [];
+  let groupAlive = true;
+  const groupKillFn = (pid: number, signal: 'SIGTERM' | 'SIGKILL' | 0) => {
+    groupSignals.push([pid, signal]);
+    if (signal === 'SIGTERM') {
+      setImmediate(() => children[0].emit('exit', null, 'SIGTERM'));
+      setTimeout(() => { groupAlive = false; }, 50);
+    }
+    if (signal === 0 && !groupAlive) {
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }
+  };
+
+  const client = new McClient({ host: '127.0.0.1', port, launchScript: '/fake.sh', spawnFn, groupKillFn, launchTimeoutMs: 5000, username: 'OldName' });
+  await client.request('status', {});
+  const result = await client.setUsername('NewName');
+
+  t.true(result.ok);
+  t.true(spawnOptions.every((options) => options.detached === true));
+  t.deepEqual(groupSignals[0], [1000, 'SIGTERM']);
+  t.true(groupSignals.some(([pid, signal]) => pid === 1000 && signal === 0));
+  t.false(groupSignals.some(([, signal]) => signal === 'SIGKILL'));
+  t.is(children.length, 2);
+
+  await close();
+});
+
 test('setUsername reports a clear error, without wedging the client, when the restart fails', async (t) => {
   let spawnCount = 0;
   const spawnFn = () => {

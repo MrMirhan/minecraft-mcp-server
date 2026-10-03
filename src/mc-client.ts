@@ -5,6 +5,12 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 
 type SpawnFn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+type GroupSignal = 'SIGTERM' | 'SIGKILL' | 0;
+type GroupKillFn = (pid: number, signal: GroupSignal) => void;
+
+const killProcessGroup: GroupKillFn = (pid, signal) => {
+  process.kill(-pid, signal);
+};
 
 const DEFAULT_HOST = process.env.MCCLI_HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.MCCLI_PORT) || 25580;
@@ -21,6 +27,7 @@ const PROBE_TIMEOUT_MS = 1500;
 const LOG_RING_SIZE = 60;
 const USERNAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 const STOP_TIMEOUT_MS = 5000;
+const GROUP_POLL_MS = 200;
 
 export function isValidMinecraftUsername(username: string): boolean {
   return USERNAME_PATTERN.test(username);
@@ -44,6 +51,8 @@ export interface McClientOptions {
   screenshotDir?: string;
   autoLaunch?: boolean;
   spawnFn?: SpawnFn;
+  /** Signals a whole process group; only used with the real spawn unless a test passes its own. */
+  groupKillFn?: GroupKillFn;
   username?: string;
 }
 
@@ -106,6 +115,7 @@ export class McClient {
   private readonly screenshotDir: string;
   private readonly autoLaunch: boolean;
   private readonly spawnFn: SpawnFn;
+  private readonly groupKillFn: GroupKillFn | null;
 
   private state: ProcessState = freshState();
   private launchingPromise: Promise<McCommandResult> | null = null;
@@ -121,6 +131,7 @@ export class McClient {
     this.screenshotDir = options.screenshotDir ?? DEFAULT_SCREENSHOT_DIR;
     this.autoLaunch = options.autoLaunch ?? true;
     this.spawnFn = options.spawnFn ?? (spawn as SpawnFn);
+    this.groupKillFn = options.groupKillFn ?? (options.spawnFn ? null : killProcessGroup);
     this.username = options.username ?? DEFAULT_USERNAME;
     this.uuid = offlinePlayerUuid(this.username);
   }
@@ -251,17 +262,55 @@ export class McClient {
     }
   }
 
+  // The launch script runs HeadlessMC, which runs the game as its own child. Only the whole process group is
+  // signalled: a game that outlives the script keeps the command socket, and the next client cannot bind it.
   private stopProcess(timeoutMs: number = STOP_TIMEOUT_MS): Promise<void> {
     const child = this.state.child;
     if (!child || !this.isProcessAlive()) {
       return Promise.resolve();
     }
+    const pid = child.pid;
+    const group = pid === undefined ? null : this.groupKillFn;
+    const signal = (sig: 'SIGTERM' | 'SIGKILL'): void => {
+      if (group && pid !== undefined) {
+        try {
+          group(pid, sig);
+          return;
+        } catch {
+          // the group is already gone; fall back to the script itself
+        }
+      }
+      child.kill(sig);
+    };
     return new Promise((resolve) => {
-      child.once('exit', () => resolve());
-      child.kill('SIGTERM');
-      const killTimer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
-      child.once('exit', () => clearTimeout(killTimer));
+      const killTimer = setTimeout(() => signal('SIGKILL'), timeoutMs);
+      child.once('exit', () => {
+        clearTimeout(killTimer);
+        if (group && pid !== undefined) {
+          void this.awaitGroupExit(group, pid, timeoutMs).then(resolve);
+        } else {
+          resolve();
+        }
+      });
+      signal('SIGTERM');
     });
+  }
+
+  private async awaitGroupExit(group: GroupKillFn, pid: number, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        group(pid, 0);
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, GROUP_POLL_MS));
+    }
+    try {
+      group(pid, 'SIGKILL');
+    } catch {
+      // gone between the last check and the kill
+    }
   }
 
   private spawnProcess(): void {
@@ -272,6 +321,7 @@ export class McClient {
     try {
       child = this.spawnFn(this.launchScript, [], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
         env: { ...process.env, MCCLI_USERNAME: this.username, MCCLI_UUID: this.uuid }
       });
     } catch (err) {
