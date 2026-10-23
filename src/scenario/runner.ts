@@ -89,12 +89,18 @@ function writes(a: Action): boolean {
 export function parseScenario(input: unknown): Scenario {
   const s = schema.parse(input);
   const names = new Set(s.bots.map((b) => b.name));
+  const allowed = new Set((process.env.SCENARIO_TEST_SERVERS ?? '').split(',').map((v) => v.trim()).filter(Boolean));
   const all: Array<Step> = [...(s.setup ?? []), ...s.steps, ...(s.cleanup ?? [])];
   for (const st of all) {
     const ref = 'bot' in st ? st.bot : (st.expect_message ?? st.expect_window ?? st.expect_slot)?.bot;
     if (ref !== undefined && !names.has(ref)) throw new Error(`step names bot "${ref}", which is not in bots`);
-    if (!s.server.testServer && 'bot' in st && writes(st as Action)) {
-      throw new Error('commands, chat and clicks change the server: they run only with server.testServer true (never on a live server)');
+    if ('bot' in st && writes(st as Action)) {
+      if (!s.server.testServer) {
+        throw new Error('commands, chat and clicks change the server: they run only with server.testServer true (never on a live server)');
+      }
+      if (!allowed.has(`${s.server.host}:${s.server.port}`)) {
+        throw new Error(`commands, chat and clicks require ${s.server.host}:${s.server.port} in SCENARIO_TEST_SERVERS; testServer alone is not permission`);
+      }
     }
   }
   return s;
