@@ -2,6 +2,7 @@ import test from 'ava';
 import net, { type AddressInfo, type Socket } from 'node:net';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { McClient, isValidMinecraftUsername, offlinePlayerUuid } from '../src/mc-client.js';
@@ -183,7 +184,6 @@ test('captureScreenshot reads the file the mod wrote and returns its bytes', asy
   const { port, close } = await startFakeServer(async (req, socket) => {
     t.is(req.command, 'screenshot');
     const targetPath = (req.params as { path: string }).path;
-    const fs = await import('node:fs/promises');
     await fs.writeFile(targetPath, fakePng);
     reply(socket, { id: req.id, success: true, data: { path: targetPath, width: 1, height: 1 } });
   });
@@ -477,4 +477,50 @@ test('setUsername reports a clear error, without wedging the client, when the re
   const status = await client.getStatus();
   t.is(status.username, 'NewName');
   t.is(status.processState, 'exited');
+});
+
+test('request carries the token given to the client', async (t) => {
+  let received: Record<string, unknown> | undefined;
+  const { port, close } = await startFakeServer((req, socket) => {
+    received = req as unknown as Record<string, unknown>;
+    reply(socket, { id: req.id, success: true, data: {} });
+  });
+  const client = new McClient({ host: '127.0.0.1', port, autoLaunch: false, socketTimeoutMs: 2000, token: 'abc123' });
+  await client.request('status', {});
+  t.is(received?.token, 'abc123');
+  await close();
+});
+
+test('request reads the token from the file the game registered for its port', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'mccli-home-'));
+  let received: Record<string, unknown> | undefined;
+  const { port, close } = await startFakeServer((req, socket) => {
+    received = req as unknown as Record<string, unknown>;
+    reply(socket, { id: req.id, success: true, data: {} });
+  });
+  const tokenFile = path.join(home, 'mccli-token');
+  await fs.writeFile(tokenFile, 'fromfile\n');
+  await fs.mkdir(path.join(home, '.mccli'));
+  await fs.writeFile(path.join(home, '.mccli', 'instances.json'), JSON.stringify([{ name: 'a', port, tokenFile }]));
+  const client = new McClient({ host: '127.0.0.1', port, autoLaunch: false, socketTimeoutMs: 2000, registryHome: home });
+  await client.request('status', {});
+  t.is(received?.token, 'fromfile');
+  await close();
+});
+
+test('setTarget switches to another game and stops launching the camera client', async (t) => {
+  const seen: string[] = [];
+  const own = await startFakeServer((req, socket) => {
+    seen.push(`own:${(req as unknown as { token?: string }).token}`);
+    reply(socket, { id: req.id, success: true, data: { who: 'own' } });
+  });
+  let spawned = 0;
+  const client = new McClient({ host: '127.0.0.1', port: 1, launchScript: '/fake.sh', spawnFn: () => { spawned++; return fakeChild(); } });
+  client.setTarget({ name: 'own', host: '127.0.0.1', port: own.port, token: 'mine' });
+  const result = await client.request('status', {});
+  t.deepEqual(result, { ok: true, data: { who: 'own' } });
+  t.deepEqual(seen, ['own:mine']);
+  t.is(spawned, 0);
+  t.is(client.getTarget().name, 'own');
+  await own.close();
 });
