@@ -218,9 +218,9 @@ The same runs from a shell for CI: `npm run scenario -- shop.json --junit report
 
 Steps: `command`, `chat`, `use_item`, `click_slot`, `close_window`, `wait` (ms); checks: `expect_message`, `expect_window`,
 `expect_slot` with `within` (default 5000 ms). A failed step skips the rest; cleanup always runs. `command`, `chat` and
-`click_slot` change the server, so a scenario with them is refused unless `server.testServer` is true **and**
-its exact address is in `SCENARIO_TEST_SERVERS`. On a live server a scenario may only join, open menus with the
-held item and check. Bots log in offline-mode.
+`click_slot`, `use_item` and `close_window` can change server state, so a scenario with them is refused unless
+`server.testServer` is true **and** its exact address is in `SCENARIO_TEST_SERVERS`. On a live server a scenario
+may only join, wait and read assertions. Bots log in offline-mode.
 
 ## Live Web Viewer
 

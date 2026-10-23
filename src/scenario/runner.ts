@@ -82,7 +82,7 @@ export interface ScenarioReport {
 const DEFAULT_WITHIN = 5000;
 
 function writes(a: Action): boolean {
-  return a.command !== undefined || a.chat !== undefined || a.click_slot !== undefined;
+  return a.command !== undefined || a.chat !== undefined || a.click_slot !== undefined || a.use_item === true || a.close_window === true;
 }
 
 /** Validates a scenario; throws with a clear message when it would change a server not marked testServer. */
@@ -96,7 +96,7 @@ export function parseScenario(input: unknown): Scenario {
     if (ref !== undefined && !names.has(ref)) throw new Error(`step names bot "${ref}", which is not in bots`);
     if ('bot' in st && writes(st as Action)) {
       if (!s.server.testServer) {
-        throw new Error('commands, chat and clicks change the server: they run only with server.testServer true (never on a live server)');
+        throw new Error('commands, chat and GUI actions can change the server: they run only with server.testServer true (never on a live server)');
       }
       if (!allowed.has(`${s.server.host}:${s.server.port}`)) {
         throw new Error(`commands, chat and clicks require ${s.server.host}:${s.server.port} in SCENARIO_TEST_SERVERS; testServer alone is not permission`);
