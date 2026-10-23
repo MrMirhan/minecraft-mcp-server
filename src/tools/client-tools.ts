@@ -4,12 +4,6 @@ import { McClient } from '../mc-client.js';
 
 type ToolResponse = ReturnType<ToolFactory['createResponse']>;
 
-function imageResponse(buffer: Buffer): ToolResponse {
-  return {
-    content: [{ type: "image", data: buffer.toString('base64'), mimeType: "image/png" }]
-  } as unknown as ToolResponse;
-}
-
 const MOUSE_BUTTONS = { left: 0, right: 1, middle: 2 } as const;
 const GLFW_MOD_SHIFT = 1;
 const SLOT_CLICK_TYPES = ['pickup', 'quick_move', 'swap', 'clone', 'throw', 'quick_craft', 'pickup_all'] as const;
@@ -90,16 +84,150 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
 
   factory.registerTool(
     "client-capture",
-    "Take a screenshot from the real Minecraft client. Unlike take-screenshot, this shows exactly what a player would see: resource packs, holograms, custom models, and open GUI screens included. Launches the client on first use, which can take up to a minute.",
+    "Take a screenshot from the real Minecraft client. Unlike take-screenshot, this shows exactly what a player would see: resource packs, holograms, custom models, and open GUI screens included. layer gui, tooltip or gui+tooltip returns the open menu and/or the hovered item's tooltip on a transparent background instead (split: two images). Launches the camera client on first use, which can take up to a minute.",
     {
-      clean: z.boolean().optional().describe("Hide the HUD before capturing (default: false)")
+      clean: z.boolean().optional().describe("Hide the HUD before capturing (default: false)"),
+      layer: z.enum(['world', 'gui', 'tooltip', 'gui+tooltip']).optional().describe("world (default) or a transparent GUI layer"),
+      split: z.boolean().optional().describe("With gui+tooltip: the menu and the tooltip as two images"),
+      guiScale: z.coerce.number().int().min(1).max(8).optional().describe("GUI scale for this capture only"),
+      trim: z.boolean().optional().describe("Crop a transparent layer to its pixels plus 8 px (default: true)")
     },
-    async ({ clean = false }: { clean?: boolean }) => {
-      const result = await mcClient.captureScreenshot(clean);
+    async ({ clean = false, layer, split, guiScale, trim }: { clean?: boolean; layer?: string; split?: boolean; guiScale?: number; trim?: boolean }) => {
+      const extra: Record<string, unknown> = {
+        ...(layer ? { layer } : {}),
+        ...(split !== undefined ? { split } : {}),
+        ...(guiScale !== undefined ? { gui_scale: guiScale } : {}),
+        ...(trim !== undefined ? { trim } : {})
+      };
+      const result = Object.keys(extra).length > 0 ? await mcClient.captureScreenshot(clean, extra) : await mcClient.captureScreenshot(clean);
       if (!result.ok) {
         return factory.createErrorResponse(result.error);
       }
-      return imageResponse(result.buffer);
+      const buffers = result.buffers ?? [result.buffer];
+      return {
+        content: buffers.map((b) => ({ type: "image", data: b.toString('base64'), mimeType: "image/png" }))
+      } as unknown as ToolResponse;
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-gui",
+    "The open screen as data, and actions on it. read (default): widgets, container slots with each item's name, lore and the tooltip this client draws, the hovered slot. hover / click / right_click / shift_click {slot or x,y}, button {text}: clicks the first active button whose label contains it, close.",
+    {
+      action: z.enum(['read', 'hover', 'click', 'right_click', 'shift_click', 'button', 'close']).optional().describe("Default: read"),
+      slot: z.coerce.number().int().optional().describe("Container slot index"),
+      x: z.coerce.number().optional().describe("GUI x, with y, instead of slot"),
+      y: z.coerce.number().optional().describe("GUI y"),
+      text: z.string().optional().describe("Part of the button label, for action button"),
+      includeEmpty: z.boolean().optional().describe("read: include empty slots (default: true)")
+    },
+    async ({ action = 'read', slot, x, y, text, includeEmpty }: { action?: string; slot?: number; x?: number; y?: number; text?: string; includeEmpty?: boolean }) => {
+      const result = await mcClient.request('gui', {
+        action,
+        ...(slot !== undefined ? { slot } : {}),
+        ...(x !== undefined ? { x } : {}),
+        ...(y !== undefined ? { y } : {}),
+        ...(text !== undefined ? { text } : {}),
+        ...(includeEmpty !== undefined ? { include_empty: includeEmpty } : {})
+      });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-events",
+    "What happened in the client, in order: chat, system, title, subtitle, actionbar, screen_open, screen_close, agent (this tool's commands), packets (counts per second), player (positions while recording), record_start/stop. Pass the returned next as since to get only new events. packets turns packet logging off, summary or all.",
+    {
+      since: z.coerce.number().int().optional().describe("Cursor from the last call (default 0)"),
+      types: z.array(z.string()).optional().describe("Only these event types"),
+      limit: z.coerce.number().int().optional().describe("At most this many (default 200)"),
+      packets: z.enum(['off', 'summary', 'all']).optional().describe("Set packet logging instead of reading")
+    },
+    async ({ since, types, limit, packets }: { since?: number; types?: string[]; limit?: number; packets?: string }) => {
+      const params = packets
+        ? { action: 'packets', mode: packets }
+        : { action: 'read', ...(since !== undefined ? { since } : {}), ...(types ? { types } : {}), ...(limit !== undefined ? { limit } : {}) };
+      const result = await mcClient.request('events', params);
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-record",
+    "Record video with the game's sound inside the client (not a window grab). action start|stop|status. path: absolute .mp4, or .mov/.webm with a transparent layer (gui, tooltip, gui+tooltip). preset max|high|balanced|light; priority smooth (60 fps) or light (30 fps). camera: a move (orbit, path, follow, attach, shot) that starts with the first frame. An events log is written next to the video (eventsPath).",
+    {
+      action: z.enum(['start', 'stop', 'status']).describe("start, stop or status"),
+      path: z.string().optional().describe("Absolute output path, for start"),
+      preset: z.enum(['max', 'high', 'balanced', 'light']).optional(),
+      priority: z.enum(['smooth', 'light']).optional().describe("smooth = 60 fps, light = 30 fps"),
+      layer: z.enum(['world', 'gui', 'tooltip', 'gui+tooltip']).optional(),
+      camera: z.record(z.string(), z.unknown()).optional().describe("Camera move object, as in client-camera move"),
+      durationMs: z.coerce.number().optional().describe("Stop after this long"),
+      wait: z.boolean().optional().describe("Return when the file is written (needs durationMs or a timed camera move)"),
+      audio: z.boolean().optional().describe("Record the game's sound (default: true)"),
+      hud: z.boolean().optional().describe("Keep the HUD (default: false)")
+    },
+    async ({ action, path: savePath, preset, priority, layer, camera, durationMs, wait, audio, hud }: {
+      action: string; path?: string; preset?: string; priority?: string; layer?: string; camera?: Record<string, unknown>;
+      durationMs?: number; wait?: boolean; audio?: boolean; hud?: boolean;
+    }) => {
+      const params: Record<string, unknown> = {
+        action,
+        ...(savePath ? { path: savePath } : {}),
+        ...(preset ? { preset } : {}),
+        ...(priority ? { priority } : {}),
+        ...(layer ? { layer } : {}),
+        ...(camera ? { camera } : {}),
+        ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+        ...(wait !== undefined ? { wait } : {}),
+        ...(audio !== undefined ? { audio } : {}),
+        ...(hud !== undefined ? { hud } : {})
+      };
+      const result = await mcClient.request('record', params, { timeoutMs: wait ? 660_000 : 30_000 });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
+    "client-target",
+    "Choose which game the client-* tools drive: camera (the workshop's hidden camera client, the default) or own (the player's own Minecraft with mc-cli installed, signed in with their own account). Only switch to own after the player said yes in this conversation; their game shows a consent screen and an F8 pause key, and live servers stay read-only. Returns what the player allows.",
+    {
+      target: z.enum(['camera', 'own']).describe("camera or own"),
+      port: z.coerce.number().int().optional().describe("The game's mc-cli port (default: found in ~/.mccli/instances.json)"),
+      host: z.string().optional().describe("Default 127.0.0.1"),
+      token: z.string().optional().describe("Default: the token file the game registered")
+    },
+    async ({ target, port, host, token }: { target: 'camera' | 'own'; port?: number; host?: string; token?: string }) => {
+      let chosenPort = port;
+      if (chosenPort === undefined) {
+        const instances = await mcClient.listInstances();
+        const pick = target === 'own'
+          ? instances.find((i) => i.headless !== true && typeof i.port === 'number')
+          : instances.find((i) => i.headless === true && typeof i.port === 'number');
+        chosenPort = (pick?.port as number | undefined) ?? (target === 'camera' ? 25580 : undefined);
+      }
+      if (chosenPort === undefined) {
+        return factory.createErrorResponse("No game of the player is running with mc-cli. Ask them to start their Minecraft with the mc-cli mod installed (Fabric or NeoForge), then try again.");
+      }
+      mcClient.setTarget({ name: target, host: host ?? '127.0.0.1', port: chosenPort, token });
+      const control = await mcClient.request('control', {});
+      if (!control.ok) {
+        return factory.createErrorResponse(`Switched to ${target} on port ${chosenPort}, but it did not answer: ${control.error}`);
+      }
+      return factory.createResponse(`Now driving ${target} (port ${chosenPort}). The player allows: ${JSON.stringify(control.data)}`);
     },
     { skipConnectionCheck: true }
   );
@@ -250,13 +378,17 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
 
   factory.registerTool(
     "client-camera",
-    "Set the real Minecraft client's view direction",
+    "Turn the player (yaw, pitch), or move a render-only camera that does not move the player (move): {action: set|look_at|frame_area|frame_entity|orbit|path|follow|attach|shot|fov|reset|status, ...}. follow keeps a moving entity in frame (entity, distance, angle 180 = behind, smoothingMs); attach rides with the player's own view; shot builds promo moves (push_in, pull_out, crane_up, crane_down, reveal, dolly_zoom) toward target {x,y,z}; path keyframes may carry fov.",
     {
-      yaw: z.coerce.number().describe("Horizontal rotation, -180 to 180"),
-      pitch: z.coerce.number().describe("Vertical rotation, -90 to 90")
+      yaw: z.coerce.number().optional().describe("Horizontal rotation, -180 to 180 (turns the player)"),
+      pitch: z.coerce.number().optional().describe("Vertical rotation, -90 to 90 (turns the player)"),
+      move: z.record(z.string(), z.unknown()).optional().describe("Render-only camera action object")
     },
-    async ({ yaw, pitch }: { yaw: number; pitch: number }) => {
-      const result = await mcClient.request('camera', { yaw, pitch });
+    async ({ yaw, pitch, move }: { yaw?: number; pitch?: number; move?: Record<string, unknown> }) => {
+      if (!move && (yaw === undefined || pitch === undefined)) {
+        return factory.createErrorResponse("Give yaw and pitch, or a move object");
+      }
+      const result = await mcClient.request('camera', move ?? { yaw, pitch });
       if (!result.ok) {
         return factory.createErrorResponse(result.error);
       }

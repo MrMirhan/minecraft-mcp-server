@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 
@@ -54,6 +55,18 @@ export interface McClientOptions {
   /** Signals a whole process group; only used with the real spawn unless a test passes its own. */
   groupKillFn?: GroupKillFn;
   username?: string;
+  /** The game's access token; default MCCLI_TOKEN, else the token file the game registered for this port. */
+  token?: string;
+  /** Where ~/.mccli/instances.json is looked up (tests). */
+  registryHome?: string;
+}
+
+/** A game this client talks to: the workshop's camera client, or the player's own game. */
+export interface McTarget {
+  name: string;
+  host: string;
+  port: number;
+  token?: string;
 }
 
 export type McCommandResult =
@@ -107,13 +120,16 @@ function freshState(previousLogLines: string[] = []): ProcessState {
  * lazily, on the first command that needs it, never at construction time.
  */
 export class McClient {
-  private readonly host: string;
-  private readonly port: number;
+  private host: string;
+  private port: number;
+  private token: string | undefined;
+  private targetName = 'camera';
+  private readonly registryHome: string;
   private readonly socketTimeoutMs: number;
   private readonly launchTimeoutMs: number;
   private readonly launchScript: string;
   private readonly screenshotDir: string;
-  private readonly autoLaunch: boolean;
+  private autoLaunch: boolean;
   private readonly spawnFn: SpawnFn;
   private readonly groupKillFn: GroupKillFn | null;
 
@@ -134,6 +150,43 @@ export class McClient {
     this.groupKillFn = options.groupKillFn ?? (options.spawnFn ? null : killProcessGroup);
     this.username = options.username ?? DEFAULT_USERNAME;
     this.uuid = offlinePlayerUuid(this.username);
+    this.token = options.token ?? (process.env.MCCLI_TOKEN || undefined);
+    this.registryHome = options.registryHome ?? os.homedir();
+  }
+
+  /** Talk to another game from now on. The player's own game is never launched by this client. */
+  setTarget(target: McTarget): void {
+    this.host = target.host;
+    this.port = target.port;
+    this.token = target.token;
+    this.targetName = target.name;
+    this.autoLaunch = target.name === 'camera' && this.autoLaunch;
+  }
+
+  getTarget(): McTarget {
+    return { name: this.targetName, host: this.host, port: this.port };
+  }
+
+  /** The games on this computer that registered themselves (~/.mccli/instances.json). */
+  async listInstances(): Promise<Array<Record<string, unknown>>> {
+    try {
+      const raw = await fsp.readFile(path.join(this.registryHome, '.mccli', 'instances.json'), 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as Array<Record<string, unknown>> : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async resolveToken(): Promise<string | undefined> {
+    if (this.token) return this.token;
+    const entry = (await this.listInstances()).find((i) => i.port === this.port && typeof i.tokenFile === 'string');
+    if (!entry) return undefined;
+    try {
+      return (await fsp.readFile(entry.tokenFile as string, 'utf8')).trim();
+    } catch {
+      return undefined;
+    }
   }
 
   async request(
@@ -147,7 +200,7 @@ export class McClient {
         return launch;
       }
     }
-    return this.sendOnce(command, params, opts.timeoutMs ?? this.socketTimeoutMs);
+    return this.sendOnce(command, params, opts.timeoutMs ?? this.socketTimeoutMs, await this.resolveToken());
   }
 
   async getStatus(): Promise<McClientStatus> {
@@ -168,11 +221,12 @@ export class McClient {
     let game: Record<string, unknown> | null = null;
     let screen: Record<string, unknown> | null = null;
     if (socketReachable) {
-      const gameResult = await this.sendOnce('status', {}, PROBE_TIMEOUT_MS);
+      const token = await this.resolveToken();
+      const gameResult = await this.sendOnce('status', {}, PROBE_TIMEOUT_MS, token);
       if (gameResult.ok) {
         game = gameResult.data;
       }
-      const screenResult = await this.sendOnce('window', { action: 'status' }, PROBE_TIMEOUT_MS);
+      const screenResult = await this.sendOnce('window', { action: 'status' }, PROBE_TIMEOUT_MS, token);
       if (screenResult.ok) {
         screen = screenResult.data;
       }
@@ -220,7 +274,8 @@ export class McClient {
     return { ok: true, data: { username, uuid, restarted: true } };
   }
 
-  async captureScreenshot(clean: boolean): Promise<{ ok: true; buffer: Buffer } | { ok: false; error: string }> {
+  /** A screenshot; {@code extra} may ask for a transparent layer (layer, split, gui_scale, trim), which can give two images. */
+  async captureScreenshot(clean: boolean, extra: Record<string, unknown> = {}): Promise<{ ok: true; buffer: Buffer; buffers: Buffer[] } | { ok: false; error: string }> {
     try {
       await fsp.mkdir(this.screenshotDir, { recursive: true });
     } catch (err) {
@@ -228,18 +283,21 @@ export class McClient {
     }
 
     const filePath = path.join(this.screenshotDir, `${randomUUID()}.png`);
-    const result = await this.request('screenshot', { path: filePath, clean });
+    const result = await this.request('screenshot', { path: filePath, clean, ...extra });
     if (!result.ok) {
       return result;
     }
 
+    const images = Array.isArray(result.data.images)
+      ? (result.data.images as Array<{ path: string }>).map((i) => i.path)
+      : [filePath];
     try {
-      const buffer = await fsp.readFile(filePath);
-      return { ok: true, buffer };
+      const buffers = await Promise.all(images.map((p) => fsp.readFile(p)));
+      return { ok: true, buffer: buffers[0], buffers };
     } catch (err) {
       return { ok: false, error: `The client reported a successful screenshot but the file could not be read: ${errorMessage(err)}` };
     } finally {
-      fsp.unlink(filePath).catch(() => undefined);
+      for (const p of images) fsp.unlink(p).catch(() => undefined);
     }
   }
 
@@ -423,7 +481,7 @@ export class McClient {
     return `The Minecraft client process exited before it became reachable (code ${this.state.exitCode ?? 'null'}, signal ${this.state.exitSignal ?? 'null'}). Last log lines: ${tail}`;
   }
 
-  private sendOnce(command: string, params: Record<string, unknown>, timeoutMs: number): Promise<McCommandResult> {
+  private sendOnce(command: string, params: Record<string, unknown>, timeoutMs: number, token?: string): Promise<McCommandResult> {
     return new Promise((resolve) => {
       const socket = new net.Socket();
       let settled = false;
@@ -482,7 +540,7 @@ export class McClient {
       });
 
       socket.connect(this.port, this.host, () => {
-        const request = { id: randomUUID(), command, params };
+        const request = { id: randomUUID(), command, params, ...(token ? { token } : {}) };
         socket.write(`${JSON.stringify(request)}\n`);
       });
     });
