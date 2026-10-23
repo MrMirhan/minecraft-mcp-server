@@ -198,6 +198,8 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 ### Scenario tests
 - `scenario-run` - Run a scripted test with several protocol bots and get pass/fail per step. Takes `scenario` (object) or `file`, optional `junit` (report path).
 
+Set `SCENARIO_TEST_SERVERS=127.0.0.1:25565` (comma-separated exact host:port values for approved **test** servers)
+before using write steps. The JSON `testServer:true` flag alone does not authorize commands, chat or clicks.
 The same runs from a shell for CI: `npm run scenario -- shop.json --junit report.xml` (exit code 0 when every step passed).
 
 ```json
@@ -216,8 +218,9 @@ The same runs from a shell for CI: `npm run scenario -- shop.json --junit report
 
 Steps: `command`, `chat`, `use_item`, `click_slot`, `close_window`, `wait` (ms); checks: `expect_message`, `expect_window`,
 `expect_slot` with `within` (default 5000 ms). A failed step skips the rest; cleanup always runs. `command`, `chat` and
-`click_slot` change the server, so a scenario with them is refused unless `server.testServer` is true: on a live
-server a scenario may only join, open menus with the held item and check. Bots log in offline-mode.
+`click_slot` change the server, so a scenario with them is refused unless `server.testServer` is true **and**
+its exact address is in `SCENARIO_TEST_SERVERS`. On a live server a scenario may only join, open menus with the
+held item and check. Bots log in offline-mode.
 
 ## Live Web Viewer
 

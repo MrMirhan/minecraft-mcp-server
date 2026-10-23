@@ -31,6 +31,17 @@ class FakeBot extends EventEmitter implements ScenarioBot {
 
 const base = { name: 'shop', server: { host: 'h', port: 1 }, bots: [{ name: 'tester' }] };
 
+// The allowlist is explicit even when a scenario claims it is a test server.
+process.env.SCENARIO_TEST_SERVERS = 'h:1';
+
+test('a testServer flag alone cannot authorize commands on another server', (t) => {
+  const write = [{ bot: 'tester', command: '/give @s diamond' }];
+  const err = t.throws(() => parseScenario({ ...base, server: { host: 'live.example', port: 25565, testServer: true }, steps: write }));
+  t.true(err?.message.includes('SCENARIO_TEST_SERVERS'));
+  t.throws(() => parseScenario({ ...base, server: { host: 'h', port: 2, testServer: true }, steps: write }));
+  t.notThrows(() => parseScenario({ ...base, server: { host: 'h', port: 1, testServer: true }, steps: write }));
+});
+
 test('commands and clicks are refused on a server not marked as a test server', (t) => {
   const err = t.throws(() => parseScenario({ ...base, steps: [{ bot: 'tester', command: '/give @s diamond' }] }));
   t.true(err?.message.includes('testServer'));
