@@ -46,8 +46,10 @@ test('commands and clicks are refused on a server not marked as a test server', 
   const err = t.throws(() => parseScenario({ ...base, steps: [{ bot: 'tester', command: '/give @s diamond' }] }));
   t.true(err?.message.includes('testServer'));
   t.throws(() => parseScenario({ ...base, steps: [{ bot: 'tester', click_slot: 3 }] }));
+  t.throws(() => parseScenario({ ...base, steps: [{ bot: 'tester', use_item: true }] }));
+  t.throws(() => parseScenario({ ...base, steps: [{ bot: 'tester', close_window: true }] }));
   t.throws(() => parseScenario({ ...base, setup: [{ bot: 'tester', command: '/clear' }], steps: [] }));
-  t.notThrows(() => parseScenario({ ...base, steps: [{ bot: 'tester', use_item: true }, { expect_window: { bot: 'tester', title_contains: 'Shop' } }] }));
+  t.notThrows(() => parseScenario({ ...base, steps: [{ expect_window: { bot: 'tester', title_contains: 'Shop' } }] }));
 });
 
 test('a scenario passes when the expected message, window and slot arrive in time', async (t) => {
