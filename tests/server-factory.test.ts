@@ -12,11 +12,11 @@ function makeConnection(): BotConnection {
   );
 }
 
-test.serial('createMcpServer registers all 72 tools', (t) => {
+test.serial('createMcpServer registers all 73 tools', (t) => {
   const toolSpy = sinon.spy(McpServer.prototype, 'tool');
   try {
     createMcpServer(makeConnection(), new MessageStore());
-    t.is(toolSpy.callCount, 72);
+    t.is(toolSpy.callCount, 73);
   } finally {
     toolSpy.restore();
   }

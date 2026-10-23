@@ -22,7 +22,8 @@
     "start": "node dist/main.js",
     "test": "ava",
     "lint": "eslint \"{src,tests}/**/*.ts\"",
-    "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix"
+    "lint:fix": "eslint \"{src,tests}/**/*.ts\" --fix",
+    "scenario": "tsx src/scenario/cli.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

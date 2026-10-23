@@ -195,6 +195,30 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 
 `client-slots`, `client-hover`, `client-click`, `client-slot-click` and `client-key` need mc-cli's `input` command (mouse, keys and slots), which is not in an upstream mc-cli release yet. The image pins the [MrMirhan/mc-cli](https://github.com/MrMirhan/mc-cli/releases/tag/v1.6.0-input.1) fork release 1.6.0-input.1, which adds it (see [GUIDE.md](GUIDE.md)). With an upstream mc-cli jar these five answer `Unknown command: input`, and every other tool keeps working. `client-type` needs the `type` input action from fork release [1.6.0-input.3](https://github.com/MrMirhan/mc-cli/releases/tag/v1.6.0-input.3), which only the `:mc26.2` image pins; on `:latest` it answers `Unknown input action 'type'`.
 
+### Scenario tests
+- `scenario-run` - Run a scripted test with several protocol bots and get pass/fail per step. Takes `scenario` (object) or `file`, optional `junit` (report path).
+
+The same runs from a shell for CI: `npm run scenario -- shop.json --junit report.xml` (exit code 0 when every step passed).
+
+```json
+{"name": "kit shop", "server": {"host": "127.0.0.1", "port": 25565, "testServer": true},
+ "bots": [{"name": "tester1"}],
+ "setup": [{"bot": "tester1", "command": "/give @s compass"}],
+ "steps": [
+   {"bot": "tester1", "use_item": true},
+   {"expect_window": {"bot": "tester1", "title_contains": "Kits", "within": 3000}},
+   {"expect_slot": {"bot": "tester1", "slot": 13, "name_contains": "Warrior", "lore_contains": "500"}},
+   {"bot": "tester1", "click_slot": 13},
+   {"expect_message": {"bot": "tester1", "contains": "You bought", "within": 3000}}
+ ],
+ "cleanup": [{"bot": "tester1", "command": "/clear"}]}
+```
+
+Steps: `command`, `chat`, `use_item`, `click_slot`, `close_window`, `wait` (ms); checks: `expect_message`, `expect_window`,
+`expect_slot` with `within` (default 5000 ms). A failed step skips the rest; cleanup always runs. `command`, `chat` and
+`click_slot` change the server, so a scenario with them is refused unless `server.testServer` is true: on a live
+server a scenario may only join, open menus with the held item and check. Bots log in offline-mode.
+
 ## Live Web Viewer
 
 The live web viewer shows the bot's 3D world in a browser. It overlays the scoreboard, boss bars, the title and action bar, the tab list, and the open window.

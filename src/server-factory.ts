@@ -19,6 +19,7 @@ import { registerCompositeTools } from './tools/composite-tools.js';
 import { registerControlTools } from './tools/control-tools.js';
 import { registerViewerTools } from './tools/viewer-tools.js';
 import { registerClientTools } from './tools/client-tools.js';
+import { registerScenarioTools } from './tools/scenario-tools.js';
 import { ActionManager } from './action-manager.js';
 import { McClient } from './mc-client.js';
 
@@ -50,6 +51,8 @@ What this bot cannot do:
 - It cannot confirm that a texture, custom model, font alignment or colour renders correctly on a player's screen. take-screenshot draws the world with vanilla assets and no resource pack; render-window draws vanilla item icons. For anything that depends on how the client actually paints the screen, ask the user for a screenshot instead of claiming it was verified.
 - get-resource-pack reports whether the server sent a pack and its URL and hash. It does not report whether the pack loaded correctly on a client.
 - take-screenshot renders with the newest assets prismarine-viewer supports. On a newer server it falls back to older assets and says so in the response.
+
+scenario-run runs a scripted test with several bots and returns pass/fail per step. Commands, chat and clicks in a scenario need server.testServer; never mark a live server as a test server.
 
 start-viewer opens a live browser view of the bot with a UI overlay, and returns the URL. It follows the bot across reconnects and server switches.`;
 
@@ -84,6 +87,7 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
   registerViewerTools(factory, connection);
   sharedMcClient ??= new McClient();
   registerClientTools(factory, sharedMcClient);
+  registerScenarioTools(factory);
 
   return server;
 }
