@@ -508,6 +508,23 @@ test('request reads the token from the file the game registered for its port', a
   await close();
 });
 
+test.serial('request falls back to the token file in the game folder when no instance is registered', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'mccli-home-'));
+  const tokenFile = path.join(home, 'mccli-token');
+  await fs.writeFile(tokenFile, 'gametoken\n');
+  process.env.MCCLI_TOKEN_FILE = tokenFile;
+  t.teardown(() => { delete process.env.MCCLI_TOKEN_FILE; });
+  let received: Record<string, unknown> | undefined;
+  const { port, close } = await startFakeServer((req, socket) => {
+    received = req as unknown as Record<string, unknown>;
+    reply(socket, { id: req.id, success: true, data: {} });
+  });
+  const client = new McClient({ host: '127.0.0.1', port, autoLaunch: false, socketTimeoutMs: 2000, registryHome: home });
+  await client.request('status', {});
+  t.is(received?.token, 'gametoken');
+  await close();
+});
+
 test('setTarget switches to another game and stops launching the camera client', async (t) => {
   const seen: string[] = [];
   const own = await startFakeServer((req, socket) => {

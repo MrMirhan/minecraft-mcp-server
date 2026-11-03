@@ -66,6 +66,32 @@ Make sure that [Claude Desktop](https://claude.ai/download) is installed. Open `
 
 Double-check that right `--port` and `--host` parameters were used. Make sure to completely reboot the Claude Desktop application (should be closed in OS tray). 
 
+## Cinematic camera client (26.2 image)
+
+The `mc26.2` image runs mc-cli 1.7.0 and bakes in Sodium, Iris, Flashback and ReplayMod at pinned versions, each checked
+against Modrinth's sha512. `client-record` takes `render: true`, a frame-exact recording that is slower than real time
+but never choppy. Use it when there is no GPU or when shaders are on. `motionBlur` blends frames into each output frame.
+
+| Variable | Effect |
+|---|---|
+| `MC_GPU` | `auto` (default) draws on `/dev/dri/renderD128` through VirtualGL when the device is passed into the container. `off` forces software. |
+| `MC_GPU_DEVICE` | Another render node. |
+| `MC_CLIENT_MEMORY` | The game's heap (default `2G`). |
+| `POENA_AGENT_SECRET` | Written to `config/poena-agent.secret` for proxies that admit agents only. |
+| `MC_EXTRA_MODS` | Space-separated `file.jar=https://...` mods fetched at launch, for mods that may not be in a public image. |
+| `MC_EXTRA_MODS_TOKEN` | Bearer token for those URLs. GitHub release asset API URLs are supported. |
+| `MC_SHADERPACKS` | `modrinth:<project>:<version>` shaderpacks fetched at launch. They are never baked in, because of their licences. |
+
+To give the client a GPU, pass the device in. A Swarm service cannot do this, so use compose:
+`devices: ["/dev/dri:/dev/dri"]`, plus `group_add` for the host's `render` group.
+
+## Recordings over HTTP
+
+`client-record` with a bare file name (`path: "shot-1.mp4"`) saves the video in the recordings folder (`MC_RECORDINGS_DIR`,
+default `<tmp>/mcp-recordings`), and its result carries `download: "/files/shot-1.mp4"`. A caller on another machine fetches
+it with `GET /files/<name>` and removes it with `DELETE /files/<name>`. Both use the same bearer token as `/mcp`. Only
+plain names inside that folder are served.
+
 ## Tool sets
 
 The server offers five groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a comma-separated list; without it, the server offers all of them.

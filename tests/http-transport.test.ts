@@ -162,3 +162,25 @@ test.serial('unauthenticated server (no token) allows initialize', async (t) => 
   t.is(res.status, 200);
   t.truthy(res.headers.get('mcp-session-id'));
 });
+
+
+test.serial('GET /files serves a recording to an authorized caller only, and DELETE removes it', async (t) => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-'));
+  process.env.MC_RECORDINGS_DIR = dir;
+  fs.writeFileSync(path.join(dir, 'shot-1.mp4'), Buffer.from('video-bytes'));
+  const { baseUrl, close } = await startServer(AUTH_TOKEN);
+  t.teardown(() => { close(); delete process.env.MC_RECORDINGS_DIR; });
+  const files = baseUrl.replace(/\/mcp$/, '/files');
+  t.is((await fetch(`${files}/shot-1.mp4`)).status, 401);
+  const ok = await fetch(`${files}/shot-1.mp4`, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } });
+  t.is(ok.status, 200);
+  t.is(ok.headers.get('content-length'), '11');
+  t.is(await ok.text(), 'video-bytes');
+  t.is((await fetch(`${files}/..%2Fsecret.mp4`, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })).status, 404);
+  t.is((await fetch(`${files}/missing.mp4`, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })).status, 404);
+  t.is((await fetch(`${files}/shot-1.mp4`, { method: 'DELETE', headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })).status, 204);
+  t.false(fs.existsSync(path.join(dir, 'shot-1.mp4')));
+});

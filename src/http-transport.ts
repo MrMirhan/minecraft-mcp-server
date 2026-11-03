@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import http from "node:http";
+import { recordingPath } from "./recordings.js";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -111,9 +113,46 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
     await transports[sessionId].handleRequest(req, res);
   };
 
+  // GET streams a recording, DELETE removes it once the caller has its copy.
+  const serveRecording = (req: http.IncomingMessage, res: http.ServerResponse, name: string): void => {
+    const file = recordingPath(name);
+    let size = -1;
+    try {
+      size = file ? fs.statSync(file).size : -1;
+    } catch {
+      size = -1;
+    }
+    if (!file || size < 0) {
+      sendJson(res, 404, jsonRpcError(-32601, "Not found"));
+      return;
+    }
+    if (req.method === "DELETE") {
+      fs.rmSync(file, { force: true });
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.method !== "GET") {
+      sendJson(res, 405, jsonRpcError(-32601, "Method not allowed"));
+      return;
+    }
+    const type = file.endsWith(".mp4") ? "video/mp4" : file.endsWith(".json") ? "application/json" : file.endsWith(".png") ? "image/png" : "application/octet-stream";
+    res.writeHead(200, { "Content-Type": type, "Content-Length": String(size) });
+    fs.createReadStream(file).on("error", () => res.destroy()).pipe(res);
+  };
+
   const server = http.createServer((req, res) => {
     const url = req.url ?? "";
     const pathname = url.split("?")[0];
+
+    if (pathname.startsWith("/files/")) {
+      if (!isAuthorized(req)) {
+        sendJson(res, 401, jsonRpcError(-32001, "Unauthorized: missing or invalid bearer token"));
+        return;
+      }
+      serveRecording(req, res, decodeURIComponent(pathname.slice("/files/".length)));
+      return;
+    }
 
     if (pathname !== MCP_PATH) {
       sendJson(res, 404, jsonRpcError(-32601, "Not found"));
