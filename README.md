@@ -110,7 +110,7 @@ The server offers eight groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a
 | `client` | The `client-*` tools: a real client through mc-cli | The real client (see [Real Client](#real-client-1)) |
 | `scenario` | `scenario-run`: scripted tests with several bots | Nothing extra |
 | `bedrock` | The `bedrock-*` tools: a Bedrock protocol bot and the Microsoft sign-in (see [Bedrock bot](#bedrock-bot)) | `bedrock-protocol`, an optional dependency, and Node.js 24 |
-| `actors` | The `actors-*` tools: paper-actors' fake players inside a Paper test server, and its metrics (see [Paper actors](#paper-actors)) | The paper-actors plugin on the server, `PAPER_ACTORS_SECRET` |
+| `actors` | The `actors-*` tools: paper-actors' fake players inside a Paper or Minestom test server, and its metrics (see [Paper actors](#paper-actors)) | paper-actors on the server (the Paper plugin, or minestom-actors in a Minestom server), `PAPER_ACTORS_SECRET` |
 | `bedrock-client` | The `bedrock-client-*` tools: the real Bedrock client and mc-cli's bridge (see [Real Bedrock client](#real-bedrock-client)) | mc-cli's `mccli` CLI, mcpelauncher, licensed game files, and the bridge |
 
 For example, an agent that tests a server with protocol bots, and drives its real client by other means, runs `MC_TOOLSETS=bot,scenario`.
@@ -135,15 +135,17 @@ Checked live against a Bedrock Dedicated Server 1.26.61 (offline mode, cheats on
 
 ## Paper actors
 
-The `actors-*` tools drive [paper-actors](https://github.com/MrMirhan/paper-actors), a Paper plugin that puts fake players inside a test server: real server players with no client and no connection. They cost far less than a bot each, so they suit crowds; and every action goes through the server's own packet handlers, so plugins see a real player's events (`PlayerInteractEvent`, `BlockBreakEvent`, `InventoryClickEvent`, `PlayerInteractEntityEvent`, `SignChangeEvent`, ...).
+The `actors-*` tools drive [paper-actors](https://github.com/MrMirhan/paper-actors), which puts fake players inside a test server, as a Paper plugin or, from 0.2.0, as `minestom-actors` in a Minestom server (the same API): real server players with no client and no connection. They cost far less than a bot each, so they suit crowds; and every action goes through the server's own packet handlers, so plugins see a real player's events (`PlayerInteractEvent`, `BlockBreakEvent`, `InventoryClickEvent`, `PlayerInteractEntityEvent`, `SignChangeEvent`, ...).
 
 - `actors-spawn` - One actor, or a crowd (`count` + `prefix`, or `names`) that joins a few per tick; `spread` scatters it, `view` sets each one's view distance.
-- `actors-act` - One action: walking and `goto` (pathfinding), fighting, `select`/`use`/`use_on`/`place`/`break` (digs for as long as survival takes), `interact` with a player or entity, every container click type and drags, `close`, screen `button`, anvil `rename`, villager `trade`, `sign`, `chat` and `command`.
+- `actors-act` - One action: walking and `goto` (pathfinding), fighting, `select`/`use`/`use_on`/`place`/`break` (digs for as long as survival takes), `interact` with a player or entity, every container click type and drags, `close`, screen `button`, anvil `rename` (its field is `text`, because `name` is the actor's), villager `trade`, `sign`, `chat` and `command`.
 - `actors-actor` - One actor in detail: position, health, inventory, the open screen with its slots and the cursor item.
 - `actors-metrics` - TPS, tick times (avg, p95, max), loaded chunks, entities, heap: read before and after a crowd to measure it.
 - `actors-state`, `actors-events`, `actors-despawn`, `actors-scene-play`, `actors-scene-stop`.
 
 Set `PAPER_ACTORS_SECRET` (the plugin's secret) and `PAPER_ACTORS_URL` (default `http://127.0.0.1:4331`; the plugin listens on loopback unless its `api.host` says otherwise, with a 32+ character secret). The plugin refuses any server not in its `allowed-servers`: it is for test servers only.
+
+On Minestom, Minestom's own events fire (`PlayerMoveEvent`, `PlayerBlockBreakEvent`, `InventoryPreClickEvent`, `EntityAttackEvent`, ...), Minestom applies no damage itself, and `trade` needs the game's own trade handler. The server's name comes from `ACTORS_SERVER_NAME`; see paper-actors' README.
 
 Checked against Paper 26.2 build 135: breaking in survival, placing, opening a chest, shift click, pickup and right drag, closing, `goto` around a wall, a command, a villager's trade screen, and a crowd of 100 joining in 7 seconds with the metrics before and after.
 
