@@ -117,7 +117,7 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
   // GET streams a recording, DELETE removes it once the caller has its copy.
   const serveRecording = (req: http.IncomingMessage, res: http.ServerResponse, name: string): void => {
     const file = recordingPath(name);
-    let size = -1;
+    let size: number;
     try {
       size = file ? fs.statSync(file).size : -1;
     } catch {
