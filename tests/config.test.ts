@@ -181,8 +181,8 @@ test.serial('parseConfig throws on invalid transport value', (t) => {
 });
 
 test('parseToolsets offers every tool set by default, a chosen list otherwise, and refuses unknown names', (t) => {
-  t.deepEqual(parseToolsets(undefined), ['bot', 'render', 'viewer', 'client', 'scenario']);
-  t.deepEqual(parseToolsets(''), ['bot', 'render', 'viewer', 'client', 'scenario']);
+  t.deepEqual(parseToolsets(undefined), ['bot', 'render', 'viewer', 'client', 'scenario', 'bedrock']);
+  t.deepEqual(parseToolsets(''), ['bot', 'render', 'viewer', 'client', 'scenario', 'bedrock']);
   t.deepEqual(parseToolsets('bot, scenario,bot'), ['bot', 'scenario']);
   t.throws(() => parseToolsets('bot,cheats'), { message: /Unknown tool set "cheats"/ });
 });

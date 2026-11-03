@@ -6,9 +6,9 @@ export type TransportKind = 'stdio' | 'http';
 /**
  * The groups of tools a server offers. bot: the mineflayer bot; render: pictures drawn without a
  * client (canvas); viewer: the live browser view (prismarine-viewer, puppeteer); client: the real
- * client through mc-cli; scenario: scripted multi-bot tests.
+ * client through mc-cli; scenario: scripted multi-bot tests; bedrock: a Bedrock protocol bot.
  */
-export const TOOLSETS = ['bot', 'render', 'viewer', 'client', 'scenario'] as const;
+export const TOOLSETS = ['bot', 'render', 'viewer', 'client', 'scenario', 'bedrock'] as const;
 export type Toolset = typeof TOOLSETS[number];
 
 /** The tool sets in a comma-separated list; all of them when it is empty. */

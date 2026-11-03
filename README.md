@@ -77,8 +77,26 @@ The server offers five groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a 
 | `viewer` | The live web viewer | `prismarine-viewer`, `puppeteer-core` |
 | `client` | The `client-*` tools: a real client through mc-cli | The real client (see [Real Client](#real-client-1)) |
 | `scenario` | `scenario-run`: scripted tests with several bots | Nothing extra |
+| `bedrock` | The `bedrock-*` tools: a Bedrock protocol bot (see [Bedrock bot](#bedrock-bot)) | `bedrock-protocol`, an optional dependency that needs cmake and a C++ compiler |
 
 For example, an agent that tests a server with protocol bots, and drives its real client by other means, runs `MC_TOOLSETS=bot,scenario`.
+
+## Bedrock bot
+
+The `bedrock-*` tools drive a second bot, separate from the Java bot: a Bedrock player without a client ([bedrock-protocol](https://github.com/PrismarineJS/bedrock-protocol), MIT). It joins a Bedrock server, or a Java server through Geyser, and speaks Bedrock 1.26.0 to 1.26.60 (default 1.26.60).
+
+- `bedrock-connect` - Join `host` (port 19132 by default) as `username`, offline. The server must allow offline players: `online-mode=false` on a Bedrock Dedicated Server, or Geyser with `auth-type: offline` or Floodgate.
+- `bedrock-disconnect` - Leave the server.
+- `bedrock-status` - Connected or not (and why it left), the server, position, dimension, game mode, health, the tab list, and how many forms are open.
+- `bedrock-send-chat`, `bedrock-read-chat` - Send chat; read the chat, system and translated messages it received.
+- `bedrock-command` - Run a command and get the server's answer. The bot needs the permission, and the server must allow cheats for commands such as `/tp`.
+- `bedrock-forms`, `bedrock-form-respond` - The forms the server opened (Geyser shows Java menus to Bedrock players as forms), and answer one: a button index, true or false, or a custom form's values. No answer closes the form.
+
+The bot does not walk and draws nothing: place it with commands on a test server.
+
+**Install.** `bedrock-protocol` is an optional dependency. Its RakNet (`raknet-native`) has no prebuilt binary that loads on current Node.js, so `npm install` builds it from source with git, cmake and a C++ compiler. Without them, npm skips `bedrock-protocol`, the rest of the server works, and the `bedrock-*` tools answer that it is not installed. The JavaScript RakNet (`jsp-raknet`) did not reach a Bedrock Dedicated Server 1.26.61, so the bot does not use it.
+
+Checked live against a Bedrock Dedicated Server 1.26.61 (offline mode, cheats on): join and spawn position, game mode, chat both ways, the tab list, `/list` and `/tp` with their answers, and the position after `/tp`. Forms are covered by unit tests only, because a vanilla Bedrock server opens none.
 
 ## Game text is data
 
