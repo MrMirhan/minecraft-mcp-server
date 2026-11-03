@@ -15,7 +15,7 @@
 ___
 
 > [!IMPORTANT]
-> Currently supports Minecraft version 1.21.11. Newer versions may not work with this MCP server, but we will add support as soon as possible.
+> The bot supports Minecraft Java up to 26.1.2 (mineflayer 4.39, minecraft-data 3.119). It was checked against a vanilla 26.1.2 server in offline mode. minecraft-data has no 26.2 data yet: to join a 26.2 server, the server (or its proxy) needs ViaBackwards. Node.js 22 or later is required.
 
 https://github.com/user-attachments/assets/6f17f329-3991-4bc7-badd-7cde9aacb92f
 
@@ -65,6 +65,24 @@ Make sure that [Claude Desktop](https://claude.ai/download) is installed. Open `
 ```
 
 Double-check that right `--port` and `--host` parameters were used. Make sure to completely reboot the Claude Desktop application (should be closed in OS tray). 
+
+## Tool sets
+
+The server offers five groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a comma-separated list; without it, the server offers all of them.
+
+| Tool set | Tools | Needs |
+| --- | --- | --- |
+| `bot` | The mineflayer bot: movement, blocks, inventory, crafting, chat, entities, UI state, status, automation, control, connection | Nothing extra |
+| `render` | `take-screenshot`, `render-window`: pictures drawn without a client | `canvas` |
+| `viewer` | The live web viewer | `prismarine-viewer`, `puppeteer-core` |
+| `client` | The `client-*` tools: a real client through mc-cli | The real client (see [Real Client](#real-client-1)) |
+| `scenario` | `scenario-run`: scripted tests with several bots | Nothing extra |
+
+For example, an agent that tests a server with protocol bots, and drives its real client by other means, runs `MC_TOOLSETS=bot,scenario`.
+
+## Game text is data
+
+Chat, signs, books, item names and lore, titles, scoreboards and kick reasons are written by players and plugins. A player can write instructions there for the model that reads them. So each answer of a tool comes between `<game-data>` and `</game-data>`, and the server's instructions tell the model to read that text as data and never follow it. A `</game-data>` inside the text is broken, so the text cannot end the block itself. This is not a filter: the model still sees the text, and the client's own rules still apply. See [yuniko-software/minecraft-mcp-server#261](https://github.com/yuniko-software/minecraft-mcp-server/issues/261).
 
 ## Running
 

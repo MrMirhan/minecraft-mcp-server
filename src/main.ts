@@ -53,7 +53,7 @@ async function main() {
     httpServer = startHttpTransport({
       port: config.httpPort,
       authToken: config.authToken,
-      createServer: () => createMcpServer(connection, messageStore),
+      createServer: () => createMcpServer(connection, messageStore, config.toolsets),
       log
     });
     return;
@@ -65,7 +65,7 @@ async function main() {
     process.exit(0);
   });
 
-  const server = createMcpServer(connection, messageStore);
+  const server = createMcpServer(connection, messageStore, config.toolsets);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
