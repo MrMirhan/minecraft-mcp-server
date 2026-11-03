@@ -2,14 +2,14 @@ import { z } from "zod";
 import { ToolFactory } from '../tool-factory.js';
 import { ActorsClient } from '../actors-client.js';
 
-// paper-actors: fake players inside a Paper test server (no client, no connection), driven over the plugin's signed API.
+// paper-actors: fake players inside a Paper or Minestom test server (no client, no connection), driven over its signed API.
 // They do not need the Java bot, so they skip its connection check.
 
 const ACTIONS = `Actions (do, with its fields):
 - moving: walk {forward -1..1, strafe -1..1, seconds, jump, sprint}, stroll {x, z, sprint}, goto {x, y, z, within, sprint} (pathfinding around walls, up steps, down drops), jump, sneak {on}, look {x, y, z}, watch {target, seconds}, teleport {x, y, z}, idle {seconds}, stop
 - fighting: fight {target, style 1.8|1.9, seconds}, attack {target}, swing
 - hands: select {slot 0-8}, equip {item, slot}, use (right click the held item), use_on {x, y, z, face} (open a chest, press a button, open a sign), place {x, y, z} (the held block, against a neighbour), break {x, y, z} (digs for as long as survival takes), interact {target: a player name or an entity type such as villager}, drop {stack}, swap_hands
-- the open screen: click {slot, type left|right|shift|shift_right|number (hotbar 1-9)|offhand|middle|drop|drop_stack|double|pickup_all|outside_left|outside_right}, drag {slots, button left|right|middle}, close, button {id} (enchanting, stonecutter, loom, lectern), rename {name} (anvil), trade {index}, sign {x, y, z, lines, front}
+- the open screen: click {slot, type left|right|shift|shift_right|number (hotbar 1-9)|offhand|middle|drop|drop_stack|double|pickup_all|outside_left|outside_right}, drag {slots, button left|right|middle}, close, button {id} (enchanting, stonecutter, loom, lectern), rename {text} (anvil; the field is text, as name is the actor's), trade {index}, sign {x, y, z, lines, front}
 - talking: chat {text}, command {command} (as the actor, with its own permissions)
 Everything goes through the server's packet handlers, so plugins see a real player's events.`;
 
@@ -19,7 +19,7 @@ export function registerActorsTools(factory: ToolFactory, client: ActorsClient):
 
   factory.registerTool(
     "actors-state",
-    "paper-actors: the actors on the Paper test server (name, place, health, what each does) and whether a scene runs. Fake players inside the server: no client, no network.",
+    "paper-actors: the actors on the test server, Paper or Minestom (name, place, health, what each does) and whether a scene runs. Fake players inside the server: no client, no network.",
     {},
     async () => json(await client.state()),
     skip
@@ -27,7 +27,7 @@ export function registerActorsTools(factory: ToolFactory, client: ActorsClient):
 
   factory.registerTool(
     "actors-spawn",
-    "Spawn fake players on the Paper test server. One: name. A crowd: count with prefix (Bot001, Bot002, ...) or names; they join a few per tick, and spread places each within that many blocks of at. Fields for all: at [x, y, z], world, profile (rookie, mid, tryhard: how human the aim is), skin, seed, view (view distance 2-32; keep it small for crowds: the world kept loaded around each actor is most of its cost).",
+    "Spawn fake players on the test server (Paper or Minestom). One: name. A crowd: count with prefix (Bot001, Bot002, ...) or names; they join a few per tick, and spread places each within that many blocks of at. Fields for all: at [x, y, z], world, profile (rookie, mid, tryhard: how human the aim is), skin, seed, view (view distance 2-32; keep it small for crowds: the world kept loaded around each actor is most of its cost).",
     {
       name: z.string().optional(),
       count: z.number().int().min(1).max(1000).optional(),
