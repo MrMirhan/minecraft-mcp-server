@@ -1,25 +1,28 @@
 import { z } from "zod";
 import { ToolFactory } from '../tool-factory.js';
 import { BEDROCK_VERSION, BedrockBot } from '../bedrock-bot.js';
+import { BedrockAuth, describeLogin } from '../bedrock-auth.js';
 
 // The Bedrock bot's tools. They do not need the Java bot, so they skip its connection check.
 
-export function registerBedrockTools(factory: ToolFactory, bot: BedrockBot): void {
+export function registerBedrockTools(factory: ToolFactory, bot: BedrockBot, auth?: BedrockAuth): void {
   const skip = { skipConnectionCheck: true };
 
   factory.registerTool(
     "bedrock-connect",
-    `Join a Bedrock server (or a Java server through Geyser) with a Bedrock protocol bot, offline, as username. The server must allow offline players. version defaults to ${BEDROCK_VERSION}. Leaves the server it was on first.`,
+    `Join a Bedrock server (or a Java server through Geyser) with a Bedrock protocol bot. auth "offline" (default) joins as username, and the server must allow offline players; auth "microsoft" joins as the Microsoft account signed in with bedrock-login (its gamertag), for online servers. version defaults to ${BEDROCK_VERSION}. Leaves the server it was on first.`,
     {
       host: z.string().describe("Server host"),
       port: z.number().int().optional().describe("Server port (default: 19132)"),
-      username: z.string().optional().describe("The bot's name (default: LLMBedrock)"),
+      username: z.string().optional().describe("The bot's name offline (default: LLMBedrock)"),
+      auth: z.enum(['offline', 'microsoft']).optional().describe("offline (default) or microsoft"),
+      account: z.string().optional().describe("With auth microsoft: which signed-in account (default: default)"),
       version: z.string().optional().describe(`Bedrock version, like 1.26.60 (default: ${BEDROCK_VERSION})`),
       timeoutMs: z.number().int().optional().describe("How long to wait for the bot to spawn (default: 30000)")
     },
-    async ({ host, port = 19132, username = 'LLMBedrock', version, timeoutMs }) => {
-      const state = await bot.connect({ host, port, username, version, timeoutMs });
-      return factory.createResponse(`Joined ${state.server} as ${state.username} (Bedrock ${state.version}).\n${JSON.stringify(state, null, 1)}`);
+    async ({ host, port = 19132, username = 'LLMBedrock', auth: mode, account, version, timeoutMs }) => {
+      const state = await bot.connect({ host, port, username, version, timeoutMs, auth: mode, account });
+      return factory.createResponse(`Joined ${state.server} as ${state.username} (Bedrock ${state.version}, ${state.auth}).\n${JSON.stringify(state, null, 1)}`);
     },
     skip
   );
@@ -99,6 +102,32 @@ export function registerBedrockTools(factory: ToolFactory, bot: BedrockBot): voi
       bot.answerForm(formId, response);
       return factory.createResponse(response === undefined ? `Closed form ${formId}.` : `Answered form ${formId} with ${JSON.stringify(response)}.`);
     },
+    skip
+  );
+
+  if (!auth) return;
+
+  factory.registerTool(
+    "bedrock-login",
+    "Sign a Microsoft account in for Bedrock (the bot's auth \"microsoft\", and mc-cli's bridge when it shares the token folder). Answers a code and a link for the person: they open microsoft.com/link, enter the code and sign in with an account that owns Bedrock. The sign-in then finishes by itself; follow it with bedrock-login-status. Once is enough: the tokens renew themselves.",
+    { account: z.string().optional().describe("A name for the account, to keep several (default: default)") },
+    async ({ account = 'default' }) => factory.createResponse(describeLogin(await auth.login(account))),
+    skip
+  );
+
+  factory.registerTool(
+    "bedrock-login-status",
+    "Whether a Microsoft account is signed in for Bedrock, or still waits for the person to enter its code. Never starts a sign-in.",
+    { account: z.string().optional().describe("default: default") },
+    async ({ account = 'default' }) => factory.createResponse(describeLogin(await auth.status(account))),
+    skip
+  );
+
+  factory.registerTool(
+    "bedrock-logout",
+    "Remove a Microsoft account's Bedrock tokens from this server.",
+    { account: z.string().optional().describe("default: default") },
+    async ({ account = 'default' }) => factory.createResponse(`Removed ${auth.logout(account)} token file(s) of "${account}".`),
     skip
   );
 }

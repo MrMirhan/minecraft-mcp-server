@@ -25,6 +25,9 @@ import { ActionManager } from './action-manager.js';
 import { McClient } from './mc-client.js';
 import { BedrockBot } from './bedrock-bot.js';
 import { registerBedrockTools } from './tools/bedrock-tools.js';
+import { BedrockAuth } from './bedrock-auth.js';
+import { BedrockClient } from './bedrock-client.js';
+import { registerBedrockClientTools } from './tools/bedrock-client-tools.js';
 import { TOOLSETS, type Toolset } from './config.js';
 
 // The HTTP transport builds a fresh McpServer per session, but only one real Minecraft
@@ -32,6 +35,8 @@ import { TOOLSETS, type Toolset } from './config.js';
 let sharedMcClient: McClient | null = null;
 // The same holds for the Bedrock bot: one per process, whichever session drives it.
 let sharedBedrockBot: BedrockBot | null = null;
+let sharedBedrockAuth: BedrockAuth | null = null;
+let sharedBedrockClient: BedrockClient | null = null;
 
 const SERVER_NAME = "minecraft-mcp-server";
 const SERVER_VERSION = "2.0.4";
@@ -69,7 +74,10 @@ const RENDER_INSTRUCTIONS = `Pictures without a client:
 
 const SCENARIO_INSTRUCTIONS = `scenario-run runs a scripted test with several bots and returns pass/fail per step. Commands, chat and clicks in a scenario need server.testServer; never mark a live server as a test server.`;
 
-const BEDROCK_INSTRUCTIONS = `The bedrock-* tools drive a second bot: a Bedrock player without a client (bedrock-protocol), separate from the Java bot. It joins a Bedrock server, or a Java server through Geyser, offline only. It reads chat, the tab list, health, position and the forms the server opens (Geyser shows Java menus to Bedrock players as forms), and sends chat, commands and form answers. It does not walk or draw; use commands such as /tp on a test server to place it.`;
+const BEDROCK_INSTRUCTIONS = `The bedrock-* tools drive a second bot: a Bedrock player without a client (bedrock-protocol), separate from the Java bot. It joins a Bedrock server, or a Java server through Geyser, offline (the server allows offline players) or with auth "microsoft" as a signed-in Microsoft account. It reads chat, the tab list, health, position and the forms the server opens (Geyser shows Java menus to Bedrock players as forms), and sends chat, commands and form answers. It does not walk or draw; use commands such as /tp on a test server to place it.
+Microsoft sign-in: bedrock-login answers a code and a link. Give both to the person, who signs in at microsoft.com/link with an account that owns Bedrock; then check bedrock-login-status. Never ask for a password. Offline stays the default; use microsoft only for online servers or when the person asks.`;
+
+const BEDROCK_CLIENT_INSTRUCTIONS = `The bedrock-client-* tools drive the real Bedrock client (mcpelauncher through mc-cli): launch it, look at it with screenshots, click, press keys, type and chat. It reaches a server through mc-cli's bridge, which shows the server to it as a LAN world (bedrock-client-join) and connects offline or signed in with Microsoft (bedrock-bridge-status says which). The bridge also reads the game for you: bedrock-client-state (position, health, inventory, forms), bedrock-client-chat-log and bedrock-client-forms; prefer them to reading a screenshot. Check every click or key with a screenshot: a slow client can miss input.`;
 
 const VIEWER_INSTRUCTIONS = `start-viewer opens a live browser view of the bot with a UI overlay, and returns the URL. It follows the bot across reconnects and server switches.`;
 
@@ -80,6 +88,7 @@ export function serverInstructions(toolsets: readonly Toolset[]): string {
   if (toolsets.includes('scenario')) parts.push(SCENARIO_INSTRUCTIONS);
   if (toolsets.includes('viewer')) parts.push(VIEWER_INSTRUCTIONS);
   if (toolsets.includes('bedrock')) parts.push(BEDROCK_INSTRUCTIONS);
+  if (toolsets.includes('bedrock-client')) parts.push(BEDROCK_CLIENT_INSTRUCTIONS);
   return parts.join('\n\n');
 }
 
@@ -122,8 +131,13 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
   }
   if (toolsets.includes('scenario')) registerScenarioTools(factory);
   if (toolsets.includes('bedrock')) {
-    sharedBedrockBot ??= new BedrockBot();
-    registerBedrockTools(factory, sharedBedrockBot);
+    sharedBedrockAuth ??= new BedrockAuth();
+    sharedBedrockBot ??= new BedrockBot(undefined, sharedBedrockAuth);
+    registerBedrockTools(factory, sharedBedrockBot, sharedBedrockAuth);
+  }
+  if (toolsets.includes('bedrock-client')) {
+    sharedBedrockClient ??= new BedrockClient();
+    registerBedrockClientTools(factory, sharedBedrockClient);
   }
 
   return server;

@@ -1,0 +1,62 @@
+# The real Bedrock client next to the MCP server, and mc-cli's bridge that joins it to a server.
+#
+#   BEDROCK_SERVER=play.example.net:19132 MCP_AUTH_TOKEN=... BEDROCK_BRIDGE_TOKEN=... docker compose up --build
+#
+# - ./bedrock/game: mcpelauncher's data folder (versions/<version>/, mods/mcpelauncher-updates/), downloaded once
+#   for a Google account that owns Minecraft. ./bedrock/credentials: its licence and sign-in files, laid out like
+#   a home folder. Neither is ever baked into an image. See mc-cli's docs/BEDROCK.md.
+# - BEDROCK_AUTH=offline (default): the server allows offline players. BEDROCK_AUTH=microsoft: the bridge joins as
+#   a Microsoft account. Sign it in once from the MCP side with the bedrock-login tool (the AI gives the person a
+#   code for microsoft.com/link); the bridge watches the shared bedrock-auth volume and goes on by itself.
+# - The bridge must be a different container from the client, on the network of the client's default route: the
+#   client looks for LAN worlds there only.
+services:
+  mcp:
+    build:
+      context: ../..
+      args:
+        BEDROCK_CLIENT: "true"
+    environment:
+      SERVER_PORT: "3000"
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN}
+      MC_TOOLSETS: ${MC_TOOLSETS:-bot,bedrock,bedrock-client}
+      BEDROCK_BRIDGE_URL: http://bridge:19150
+      BEDROCK_BRIDGE_TOKEN: ${BEDROCK_BRIDGE_TOKEN:?set BEDROCK_BRIDGE_TOKEN (16+ characters)}
+      BEDROCK_AUTH_DIR: /bedrock-auth
+      MCCLI_BEDROCK_GAME: /bedrock/game
+      MCCLI_BEDROCK_CREDENTIALS: /bedrock/credentials
+    volumes:
+      - bedrock-auth:/bedrock-auth
+      - ./bedrock/game:/bedrock/game
+      - ./bedrock/credentials:/bedrock/credentials:ro
+    ports:
+      - "3000:3000"
+    networks: [bedrock]
+
+  bridge:
+    build:
+      context: .
+      dockerfile: bridge.Dockerfile
+    command:
+      - --target
+      - ${BEDROCK_SERVER:?set BEDROCK_SERVER to host:port}
+      - --name
+      - ${BEDROCK_LAN_NAME:-Test server}
+      - --auth
+      - ${BEDROCK_AUTH:-offline}
+      - --auth-dir
+      - /bedrock-auth
+      - --control
+      - 0.0.0.0:19150
+    environment:
+      MCCLI_BEDROCK_BRIDGE_TOKEN: ${BEDROCK_BRIDGE_TOKEN}
+    volumes:
+      - bedrock-auth:/bedrock-auth
+    networks: [bedrock]
+
+networks:
+  bedrock:
+    driver: bridge
+
+volumes:
+  bedrock-auth: {}

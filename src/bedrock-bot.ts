@@ -1,10 +1,12 @@
 import { randomUUID } from 'crypto';
+import type { BedrockAuth } from './bedrock-auth.js';
 
 // A Bedrock protocol bot (bedrock-protocol, MIT): it joins a Bedrock server, or a Java server through
 // Geyser, as a player without a client. It reads what the server sends a player (chat, the tab list,
 // forms, health, position) and sends chat, commands and form answers. It does not move by itself and
-// draws nothing. It logs in offline only: the server must allow offline players (online-mode=false,
-// or Geyser's auth-type offline / Floodgate).
+// draws nothing. It logs in offline (the server must allow offline players: online-mode=false, or
+// Geyser's auth-type offline / Floodgate) or, with auth "microsoft", as a Microsoft account signed in
+// with bedrock-login.
 
 /** The Bedrock version the bot speaks unless told; bedrock-protocol's newest. */
 export const BEDROCK_VERSION = '1.26.60';
@@ -26,6 +28,8 @@ export interface BedrockForm {
 
 export interface BedrockState {
   connected: boolean;
+  auth?: 'offline' | 'microsoft';
+  account?: string;
   server?: string;
   username?: string;
   version?: string;
@@ -72,26 +76,45 @@ export class BedrockBot {
   private players = new Map<string, string>();
   private state: Omit<BedrockState, 'players' | 'forms'> = { connected: false };
 
-  constructor(private load: () => Promise<BedrockModule> = loadBedrock) {}
+  constructor(private load: () => Promise<BedrockModule> = loadBedrock, private auth?: BedrockAuth) {}
 
-  /** Joins `host:port` as `username`; resolves once the bot has spawned. */
-  async connect(opts: { host: string; port: number; username: string; version?: string; timeoutMs?: number }): Promise<BedrockState> {
+  /**
+   * Joins `host:port`; resolves once the bot has spawned. Offline it is `username`; with auth "microsoft" it
+   * is the account's Xbox profile, and the account must be signed in (bedrock-login) first.
+   */
+  async connect(opts: { host: string; port: number; username: string; version?: string; timeoutMs?: number; auth?: 'offline' | 'microsoft'; account?: string }): Promise<BedrockState> {
     this.disconnect();
+    const online = opts.auth === 'microsoft';
+    const account = opts.account ?? 'default';
+    if (online) {
+      if (!this.auth) throw new Error('Microsoft sign-in is not set up in this server');
+      if (!(await this.auth.isSignedIn(account))) throw new Error(`Account "${account}" is not signed in with Microsoft: call bedrock-login first`);
+    }
     const bedrock = await this.load();
     const version = opts.version ?? BEDROCK_VERSION;
+    let refuse: (err: Error) => void = () => {};
     const client = bedrock.createClient({
       host: opts.host,
       port: opts.port,
-      username: opts.username,
-      offline: true,
+      username: online ? account : opts.username,
+      offline: !online,
       version,
-      conLog: null
+      // A host and port mean RakNet; left open, bedrock-protocol also tries NetherNet LAN discovery and can
+      // land on a LAN world (mc-cli's bridge) answering on the same host.
+      transport: 'raknet',
+      conLog: null,
+      ...(online ? {
+        ...this.auth!.options(),
+        profilesFolder: this.auth!.cacheFor(account),
+        // Only when the cached sign-in could not be renewed: never wait on a code nobody sees.
+        onMsaCode: () => refuse(new Error(`The sign-in of "${account}" expired: call bedrock-login again`))
+      } : {})
     });
     this.client = client;
     this.chat = [];
     this.forms.clear();
     this.players.clear();
-    this.state = { connected: false, server: `${opts.host}:${opts.port}`, username: opts.username, version };
+    this.state = { connected: false, auth: online ? 'microsoft' : 'offline', ...(online ? { account } : {}), server: `${opts.host}:${opts.port}`, username: online ? undefined : opts.username, version };
     const on = (name: string, fn: (p: Packet) => void) => client.on(name, fn);
     on('start_game', (p) => {
       this.entityId = BigInt(p.runtime_entity_id as bigint | number);
@@ -135,9 +158,13 @@ export class BedrockBot {
         this.close();
         reject(err);
       };
+      refuse = fail;
       on('spawn', () => {
         clearTimeout(timer);
         this.state.connected = true;
+        // Online, the name is the account's gamertag, known once the server accepted it.
+        if (online) this.state.username = (client as unknown as { username?: string; profile?: { name?: string } }).profile?.name
+          ?? (client as unknown as { username?: string }).username;
         resolve();
       });
       on('kick', (p) => fail(new Error(`The server refused the bot: ${String(p.message ?? p.reason ?? 'kicked')}`)));
