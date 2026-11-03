@@ -437,6 +437,23 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
   );
 
   factory.registerTool(
+    "client-size",
+    "Set the headless camera client's frame size in pixels (mc-cli 1.9+): recordings, captures and the live view take that size at once, without a restart. 1080x1920 for a vertical Short, 1920x1080 or 3840x2160 for YouTube, 2160x3840 for a vertical 4K render.",
+    {
+      width: z.number().int().min(64).max(16384).describe("Frame width in pixels"),
+      height: z.number().int().min(64).max(16384).describe("Frame height in pixels")
+    },
+    async ({ width, height }: { width: number; height: number }) => {
+      const result = await mcClient.request('window', { action: 'size', width, height });
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
+  factory.registerTool(
     "client-spectate",
     "Ride another player's view in spectator mode, to capture a screenshot from their viewpoint (for example, the bot's). Call with no player to leave spectating.",
     {
