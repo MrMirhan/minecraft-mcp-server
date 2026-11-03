@@ -7,7 +7,7 @@ ARG JAVA_IMAGE=eclipse-temurin:21-jre-jammy
 FROM ${JAVA_IMAGE} AS java
 
 # --- Stage 1: build ---
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -21,7 +21,8 @@ COPY src ./src
 RUN npm run build
 
 # --- Stage 2: runtime ---
-FROM node:22-bookworm-slim
+# Node 24: bedrock-protocol (the Bedrock bot, optional) needs it; on Node 22 npm leaves it out.
+FROM node:24-bookworm-slim
 
 # tini for PID 1 signal handling; iproute2 for the entrypoint's `ip route`;
 # chromium + fontconfig/fonts-dejavu-core for the render-tools screenshot/canvas pipeline.
@@ -30,16 +31,22 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Pterodactyl requires a `container` user with home at /home/container.
-RUN useradd -m -d /home/container -s /bin/bash container
+# uid 1001 (the node image's own `node` user is 1000): mc-cli's bridge image uses the same, so both read the shared
+# Bedrock token folder, whose files are owner-only.
+RUN useradd -m -u 1001 -d /home/container -s /bin/bash container \
+    && mkdir -p /bedrock-auth && chown container:container /bedrock-auth && chmod 700 /bedrock-auth
 
 WORKDIR /app
 
 # Production dependencies only — no dev deps, no TS sources.
 # scripts.prepare (tsc, needs devDeps/src not present here) is dropped instead of using
 # --ignore-scripts, because canvas's own install script must still run to fetch its native binary.
+# SKIP_BUILD keeps raknet-native (bedrock-protocol's RakNet, optional) from building with cmake; the postinstall
+# script links its prebuilt binary for the running kernel instead, so the Bedrock bot works in the image.
 COPY package*.json ./
+COPY scripts/fix-raknet.cjs ./scripts/fix-raknet.cjs
 RUN npm pkg delete scripts.prepare \
-    && npm ci --omit=dev \
+    && SKIP_BUILD=1 npm ci --omit=dev \
     && npm cache clean --force
 
 # prismarine-viewer ships texture sets for every Minecraft version it supports (~197MB).
@@ -230,6 +237,25 @@ RUN { \
 
 # The client process (and its natives/screenshots/logs/saves) runs as the unprivileged
 # `container` user below, same as the MCP server itself.
+# --- Real Bedrock client (optional: docker build --build-arg BEDROCK_CLIENT=true) ---
+# mcpelauncher (minecraft-linux, GPL-3.0) from its apt repository, the X tools mc-cli drives it with, and mc-cli's
+# CLI (`mccli bedrock`), which the bedrock-client-* tools call. The game files are licensed per Google account and
+# never baked in: mount them and set MCCLI_BEDROCK_GAME (and MCCLI_BEDROCK_CREDENTIALS). The client reaches a
+# server through mc-cli's bridge, which runs in another container (docker/bedrock/compose.yml).
+ARG BEDROCK_CLIENT=false
+ARG BEDROCK_MCCLI_REF=20564cb
+RUN if [ "${BEDROCK_CLIENT}" = "true" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends gnupg curl ca-certificates \
+      && curl -fsSL https://minecraft-linux.github.io/pkg/deb/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/mcpelauncher.gpg \
+      && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/mcpelauncher.gpg] https://minecraft-linux.github.io/pkg/deb bookworm-nightly main" > /etc/apt/sources.list.d/mcpelauncher.list \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends mcpelauncher-manifest libatomic1 xdotool x11-utils imagemagick python3 python3-pip \
+      && pip3 install --no-cache-dir --break-system-packages "mccli @ https://github.com/${MCCLI_REPO}/archive/${BEDROCK_MCCLI_REF}.tar.gz#subdirectory=cli" \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+ENV BEDROCK_START_XVFB=${BEDROCK_CLIENT} BEDROCK_DISPLAY=:98
+
 RUN chown -R container:container "${MC_CLIENT_DIR}"
 
 COPY --from=builder /app/dist ./dist

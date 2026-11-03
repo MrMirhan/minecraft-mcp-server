@@ -15,7 +15,7 @@
 ___
 
 > [!IMPORTANT]
-> The bot supports Minecraft Java up to 26.1.2 (mineflayer 4.39, minecraft-data 3.119). It was checked against a vanilla 26.1.2 server in offline mode. minecraft-data has no 26.2 data yet: to join a 26.2 server, the server (or its proxy) needs ViaBackwards. Node.js 22 or later is required.
+> The bot supports Minecraft Java up to 26.1.2 (mineflayer 4.39, minecraft-data 3.119). It was checked against a vanilla 26.1.2 server in offline mode. minecraft-data has no 26.2 data yet: to join a 26.2 server, the server (or its proxy) needs ViaBackwards. Node.js 22 or later is required; the Bedrock tools need Node.js 24 (bedrock-protocol), and the Docker image runs 24.
 
 https://github.com/user-attachments/assets/6f17f329-3991-4bc7-badd-7cde9aacb92f
 
@@ -100,7 +100,7 @@ plain names inside that folder are served.
 
 ## Tool sets
 
-The server offers five groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a comma-separated list; without it, the server offers all of them.
+The server offers seven groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a comma-separated list; without it, the server offers all of them.
 
 | Tool set | Tools | Needs |
 | --- | --- | --- |
@@ -109,7 +109,8 @@ The server offers five groups of tools. `--toolsets` (or `MC_TOOLSETS`) takes a 
 | `viewer` | The live web viewer | `prismarine-viewer`, `puppeteer-core` |
 | `client` | The `client-*` tools: a real client through mc-cli | The real client (see [Real Client](#real-client-1)) |
 | `scenario` | `scenario-run`: scripted tests with several bots | Nothing extra |
-| `bedrock` | The `bedrock-*` tools: a Bedrock protocol bot (see [Bedrock bot](#bedrock-bot)) | `bedrock-protocol`, an optional dependency that needs cmake and a C++ compiler |
+| `bedrock` | The `bedrock-*` tools: a Bedrock protocol bot and the Microsoft sign-in (see [Bedrock bot](#bedrock-bot)) | `bedrock-protocol`, an optional dependency, and Node.js 24 |
+| `bedrock-client` | The `bedrock-client-*` tools: the real Bedrock client and mc-cli's bridge (see [Real Bedrock client](#real-bedrock-client)) | mc-cli's `mccli` CLI, mcpelauncher, licensed game files, and the bridge |
 
 For example, an agent that tests a server with protocol bots, and drives its real client by other means, runs `MC_TOOLSETS=bot,scenario`.
 
@@ -117,7 +118,8 @@ For example, an agent that tests a server with protocol bots, and drives its rea
 
 The `bedrock-*` tools drive a second bot, separate from the Java bot: a Bedrock player without a client ([bedrock-protocol](https://github.com/PrismarineJS/bedrock-protocol), MIT). It joins a Bedrock server, or a Java server through Geyser, and speaks Bedrock 1.26.0 to 1.26.60 (default 1.26.60).
 
-- `bedrock-connect` - Join `host` (port 19132 by default) as `username`, offline. The server must allow offline players: `online-mode=false` on a Bedrock Dedicated Server, or Geyser with `auth-type: offline` or Floodgate.
+- `bedrock-connect` - Join `host` (port 19132 by default, RakNet). `auth: "offline"` (default) joins as `username`, and the server must allow offline players: `online-mode=false` on a Bedrock Dedicated Server, or Geyser with `auth-type: offline` or Floodgate. `auth: "microsoft"` joins as the Microsoft account signed in with `bedrock-login` (its gamertag), for online servers; `account` picks one of several.
+- `bedrock-login`, `bedrock-login-status`, `bedrock-logout` - Microsoft sign-in without a password: `bedrock-login` answers a code and a link, the person enters the code at microsoft.com/link with an account that owns Bedrock, and the sign-in finishes by itself. The tokens renew themselves and live in `BEDROCK_AUTH_DIR` (default `~/.minecraft-mcp/bedrock-auth`, owner-only files). mc-cli's bridge reads the same layout: share the folder and one sign-in serves the bot and the real client.
 - `bedrock-disconnect` - Leave the server.
 - `bedrock-status` - Connected or not (and why it left), the server, position, dimension, game mode, health, the tab list, and how many forms are open.
 - `bedrock-send-chat`, `bedrock-read-chat` - Send chat; read the chat, system and translated messages it received.
@@ -126,9 +128,38 @@ The `bedrock-*` tools drive a second bot, separate from the Java bot: a Bedrock 
 
 The bot does not walk and draws nothing: place it with commands on a test server.
 
-**Install.** `bedrock-protocol` is an optional dependency. Its RakNet (`raknet-native`) has no prebuilt binary that loads on current Node.js, so `npm install` builds it from source with git, cmake and a C++ compiler. Without them, npm skips `bedrock-protocol`, the rest of the server works, and the `bedrock-*` tools answer that it is not installed. The JavaScript RakNet (`jsp-raknet`) did not reach a Bedrock Dedicated Server 1.26.61, so the bot does not use it.
+**Install.** `bedrock-protocol` is an optional dependency and needs Node.js 24; on older Node, npm leaves it out, the rest of the server works, and the `bedrock-*` tools answer that it is not installed. Its RakNet (`raknet-native`) ships prebuilt binaries, but looked only for the running kernel's folder (`linux-5-x64`) and fell back to building with cmake on Linux 6. Install with `SKIP_BUILD=1 npm install`: the `postinstall` script (`scripts/fix-raknet.cjs`) links the prebuilt binary for the running kernel, so no cmake or compiler is needed. Behind an HTTPS proxy, the Microsoft sign-in needs `NODE_USE_ENV_PROXY=1`.
 
-Checked live against a Bedrock Dedicated Server 1.26.61 (offline mode, cheats on): join and spawn position, game mode, chat both ways, the tab list, `/list` and `/tp` with their answers, and the position after `/tp`. Forms are covered by unit tests only, because a vanilla Bedrock server opens none.
+Checked live against a Bedrock Dedicated Server 1.26.61 (offline mode, cheats on): join and spawn position, game mode, chat both ways, the tab list, `/list` and `/tp` with their answers, and the position after `/tp`. Forms are covered by unit tests only, because a vanilla Bedrock server opens none. `bedrock-login` got a device code from Microsoft; joining an online server signed in was not tested here (it needs an account that owns Bedrock).
+
+## Real Bedrock client
+
+The `bedrock-client-*` tools drive the real Bedrock client on Linux (mcpelauncher) through mc-cli's `mccli bedrock`, and read its game from mc-cli's bridge, which joins the client to a server. See mc-cli's [docs/BEDROCK.md](https://github.com/MrMirhan/mc-cli/blob/main/docs/BEDROCK.md).
+
+- `bedrock-client-launch`, `-status`, `-quit`, `-logs` - Start the client from its game files and wait for its window, check it, stop it, read its log.
+- `bedrock-client-screenshot`, `-click`, `-key`, `-type`, `-scroll`, `-chat` - See the window, and use it as a player does: a click returns a screenshot after it.
+- `bedrock-client-join` - From the title screen, join the LAN world the bridge shows.
+- `bedrock-bridge-status` - The bridge: the server it relays to, offline or `microsoft` and the account, a pending sign-in code, its clients.
+- `bedrock-client-state`, `-chat-log`, `-forms`, `-form-respond` - What the bridge sees of the client's game: world, position, dimension, game mode, health, inventory by item name, title, tab list, nearby players, chat and open forms; and answering a form.
+
+The bridge joins the server as the Microsoft account signed in into its token folder, or offline when there is none (`--auth auto`, its default); `--offline` / `--auth microsoft` choose explicitly. Sign in once with `bedrock-login` into a folder the bridge shares: with `--auth microsoft` a waiting bridge goes on by itself; in `auto` restart it to pick the sign-in up.
+
+**Docker.** `docker build --build-arg BEDROCK_CLIENT=true .` adds mcpelauncher (from minecraft-linux's apt repository), xdotool, x11-utils, ImageMagick and mc-cli's CLI; the client draws on its own Xvfb display (`BEDROCK_DISPLAY`, default `:98`). The game files are licensed per Google account and never baked in. `docker/bedrock/compose.yml` runs the MCP server with the client next to the bridge (its own image, `docker/bedrock/bridge.Dockerfile`), on one network, with a shared token volume:
+
+```bash
+cd docker/bedrock
+BEDROCK_SERVER=play.example.net:19132 MCP_AUTH_TOKEN=... BEDROCK_BRIDGE_TOKEN=... docker compose up --build
+```
+
+| Variable | Effect |
+|---|---|
+| `MCCLI_BIN` | The mccli command (default `mccli`) |
+| `BEDROCK_BRIDGE_URL`, `BEDROCK_BRIDGE_TOKEN` | The bridge's control API and its token (default `http://127.0.0.1:19150`, no token on loopback) |
+| `BEDROCK_AUTH_DIR` | The Microsoft token folder, shared with the bridge's `--auth-dir` |
+| `MCCLI_BEDROCK_GAME`, `MCCLI_BEDROCK_CREDENTIALS` | The client's game files and licence files (mc-cli) |
+| `BEDROCK_DISPLAY`, `BEDROCK_START_XVFB` | The client's X display, and whether to start Xvfb on it (the image's Bedrock variant does) |
+
+The image changes were not built here (no Docker daemon). The tools, the bridge and its state were checked against a Bedrock Dedicated Server 1.26.61 with a protocol client joining through the bridge; a real mcpelauncher client was not run here.
 
 ## Game text is data
 
