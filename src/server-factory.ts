@@ -22,11 +22,15 @@ import { registerClientTools } from './tools/client-tools.js';
 import { registerScenarioTools } from './tools/scenario-tools.js';
 import { ActionManager } from './action-manager.js';
 import { McClient } from './mc-client.js';
+import { BedrockBot } from './bedrock-bot.js';
+import { registerBedrockTools } from './tools/bedrock-tools.js';
 import { TOOLSETS, type Toolset } from './config.js';
 
 // The HTTP transport builds a fresh McpServer per session, but only one real Minecraft
 // client may exist per process: it costs ~2GB and binds a single control port.
 let sharedMcClient: McClient | null = null;
+// The same holds for the Bedrock bot: one per process, whichever session drives it.
+let sharedBedrockBot: BedrockBot | null = null;
 
 const SERVER_NAME = "minecraft-mcp-server";
 const SERVER_VERSION = "2.0.4";
@@ -61,6 +65,8 @@ const RENDER_INSTRUCTIONS = `Pictures without a client:
 
 const SCENARIO_INSTRUCTIONS = `scenario-run runs a scripted test with several bots and returns pass/fail per step. Commands, chat and clicks in a scenario need server.testServer; never mark a live server as a test server.`;
 
+const BEDROCK_INSTRUCTIONS = `The bedrock-* tools drive a second bot: a Bedrock player without a client (bedrock-protocol), separate from the Java bot. It joins a Bedrock server, or a Java server through Geyser, offline only. It reads chat, the tab list, health, position and the forms the server opens (Geyser shows Java menus to Bedrock players as forms), and sends chat, commands and form answers. It does not walk or draw; use commands such as /tp on a test server to place it.`;
+
 const VIEWER_INSTRUCTIONS = `start-viewer opens a live browser view of the bot with a UI overlay, and returns the URL. It follows the bot across reconnects and server switches.`;
 
 /** The server's instructions for the tool sets it offers. */
@@ -69,6 +75,7 @@ export function serverInstructions(toolsets: readonly Toolset[]): string {
   if (toolsets.includes('render')) parts.push(RENDER_INSTRUCTIONS);
   if (toolsets.includes('scenario')) parts.push(SCENARIO_INSTRUCTIONS);
   if (toolsets.includes('viewer')) parts.push(VIEWER_INSTRUCTIONS);
+  if (toolsets.includes('bedrock')) parts.push(BEDROCK_INSTRUCTIONS);
   return parts.join('\n\n');
 }
 
@@ -109,6 +116,10 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
     registerClientTools(factory, sharedMcClient);
   }
   if (toolsets.includes('scenario')) registerScenarioTools(factory);
+  if (toolsets.includes('bedrock')) {
+    sharedBedrockBot ??= new BedrockBot();
+    registerBedrockTools(factory, sharedBedrockBot);
+  }
 
   return server;
 }

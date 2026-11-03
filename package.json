@@ -37,6 +37,9 @@
     "yargs": "^18.0.0",
     "zod": "^4.4.3"
   },
+  "optionalDependencies": {
+    "bedrock-protocol": "^3.61.0"
+  },
   "devDependencies": {
     "@ava/typescript": "^7.0.0",
     "@eslint/js": "^10.0.1",
