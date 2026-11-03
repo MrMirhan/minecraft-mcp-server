@@ -192,6 +192,11 @@ test.serial('GET /live streams the client screen as MJPEG to an authorized calle
   t.true(args.includes(':99'));
   t.true(args.join(' ').includes('scale=640:-2'));
   t.is(args[args.length - 1], '-');
+  const { macLiveArgs } = await import('../src/live.js');
+  const mac = macLiveArgs('Capture screen 0', 15, 960);
+  t.deepEqual(mac.slice(0, 9), ['-loglevel', 'error', '-f', 'avfoundation', '-capture_cursor', '0', '-framerate', '15', '-i']);
+  t.true(mac.includes('Capture screen 0:none'));
+  t.true(mac.join(' ').includes('scale=960:-2'));
   const capped = liveArgs(':99', 999, 99999);
   t.true(capped.includes('30'));
   t.true(capped.join(' ').includes('scale=1280:-2'));
@@ -200,7 +205,9 @@ test.serial('GET /live streams the client screen as MJPEG to an authorized calle
   const live = baseUrl.replace(/\/mcp$/, '/live');
   t.is((await fetch(live)).status, 401);
   process.env.MC_LIVE_DISPLAY_SOCKET = '/nonexistent/X99';
+  process.env.MC_LIVE_SOURCE = 'x11';
   const res = await fetch(live, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } });
   delete process.env.MC_LIVE_DISPLAY_SOCKET;
+  delete process.env.MC_LIVE_SOURCE;
   t.is(res.status, 503);
 });
