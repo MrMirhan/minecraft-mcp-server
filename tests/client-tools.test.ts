@@ -11,7 +11,9 @@ const TOOL_NAMES = [
   'client-inventory', 'client-item', 'client-block', 'client-entity',
   'client-teleport', 'client-camera', 'client-gamemode', 'client-size', 'client-spectate',
   'client-connect', 'client-disconnect', 'client-execute',
-  'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-type', 'client-interact'
+  'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-type', 'client-interact',
+  'client-pilot', 'client-scan', 'client-players', 'client-chat', 'client-logs', 'client-perf', 'client-shader', 'client-time',
+  'client-replay', 'client-world', 'client-resourcepack', 'client-command'
 ];
 
 function baseStatus(overrides: Partial<McClientStatus> = {}): McClientStatus {
@@ -322,6 +324,25 @@ test('client-gamemode runs an execute command', async (t) => {
   t.true(result.content[0].text.includes('creative'));
 });
 
+test('client-pilot passes its steps and profile to mc-cli pilot', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-pilot');
+  const steps = [{ do: 'fight', target: 'egeboii', style: '1.9', seconds: 6 }];
+
+  await executor({ action: 'run', steps, profile: 'tryhard' });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('pilot', { action: 'run', steps, profile: 'tryhard' }));
+});
+
+test('client-command runs any mc-cli command with its params', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-command');
+
+  await executor({ command: 'scan', params: { radius: 4 } });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('scan', { radius: 4 }));
+});
+
 test('client-size sets the headless frame size through the window command', async (t) => {
   const { mockServer, mockClient } = setup();
   const { executor } = getExecutor(mockServer, 'client-size');
@@ -412,7 +433,11 @@ test('every client-* tool returns a text error, not a throw, when the client is 
                         ? { target: 'block' }
                         : name === 'client-size'
                           ? { width: 1080, height: 1920 }
-                          : {};
+                          : name === 'client-command'
+                            ? { command: 'perf' }
+                            : ['client-pilot', 'client-chat', 'client-shader', 'client-world', 'client-resourcepack'].includes(name)
+                              ? { action: name === 'client-pilot' ? 'status' : name === 'client-chat' ? 'history' : 'list' }
+                              : {};
 
     const result = await executor(args);
     t.true(result.isError, `${name} must mark isError on failure`);

@@ -436,6 +436,113 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
     { skipConnectionCheck: true }
   );
 
+
+  // mc-cli commands with no client-* tool of their own before: each passes its parameters through as mc-cli takes them.
+  const passthrough = (name: string, command: string, description: string, shape: Record<string, z.ZodTypeAny>, timeoutMs?: number) => {
+    factory.registerTool(name, description, shape,
+      async (args: Record<string, unknown>) => {
+        const params = Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined));
+        const result = await mcClient.request(command, params, timeoutMs ? { timeoutMs } : {});
+        if (!result.ok) return factory.createErrorResponse(result.error);
+        return factory.createResponse(JSON.stringify(result.data));
+      },
+      { skipConnectionCheck: true });
+  };
+
+  passthrough("client-pilot", "pilot",
+    "Play steps with the camera player's own keys and crosshair, tick by tick, like a person (for POV shots, fights, building). Only in singleplayer or on servers in the client's config/mccli.json pilotServers (test servers). action run takes steps [{do, ...}]: walk_to {x,z}, look_at {x,y,z}, place {x,y,z,item?}, break {x,y,z}, select {slot|item}, jump, wait {ms}, follow {target,distance}, fight {target, style 1.8|1.9, seconds}; profile rookie|mid|tryhard sets turn speed and aim. Returns at once; status shows progress, stop cancels.",
+    {
+      action: z.enum(["run", "status", "stop"]).describe("run, status or stop"),
+      steps: z.array(z.record(z.string(), z.unknown())).optional().describe("Steps for run, e.g. [{do:'fight', target:'egeboii', style:'1.9', seconds:6}]"),
+      profile: z.enum(["rookie", "mid", "tryhard"]).optional().describe("How a person plays: rookie, mid, tryhard")
+    });
+
+  passthrough("client-scan", "scan",
+    "The blocks around the camera player in one compact answer (layers of rows, a palette), its position, facing and the block under the crosshair: read the surroundings without a screenshot.",
+    {
+      radius: z.number().int().min(1).max(16).optional().describe("Horizontal radius (default 6)"),
+      below: z.number().int().min(0).max(16).optional().describe("Layers below (default 2)"),
+      above: z.number().int().min(0).max(16).optional().describe("Layers above (default 4)")
+    });
+
+  passthrough("client-players", "players",
+    "The tab list (name, game mode, latency) and the players loaded nearby with position, look, health and distance.", {});
+
+  passthrough("client-chat", "chat",
+    "Send a chat line or read the chat the client received (chat and system messages).",
+    {
+      action: z.enum(["send", "history", "clear"]).describe("send, history or clear"),
+      message: z.string().max(256).optional().describe("Text to send (send)"),
+      limit: z.number().int().min(1).max(500).optional().describe("How many messages (history, default 50)"),
+      type: z.enum(["chat", "system"]).optional().describe("Filter (history)")
+    });
+
+  passthrough("client-logs", "logs",
+    "Recent lines of the game's own log, by level and an optional regex filter: mod errors, shader errors, disconnect reasons.",
+    {
+      level: z.enum(["error", "warn", "info", "debug"]).optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      filter: z.string().max(200).optional().describe("Regex on the message"),
+      clear: z.boolean().optional()
+    });
+
+  passthrough("client-perf", "perf",
+    "The camera client's frame rate, frame time, memory and pending chunk updates: check before a take whether it can draw the shot smoothly.", {});
+
+  passthrough("client-shader", "shader",
+    "Shader packs: list, get the active one, set one by name (a look for the shot), reload, disable, or read compile errors.",
+    {
+      action: z.enum(["list", "get", "set", "reload", "disable", "errors"]),
+      name: z.string().max(200).optional().describe("Pack name (set)")
+    });
+
+  passthrough("client-time", "time",
+    "The client-side world time: get, or set a number 0-24000 or a name (sunrise, day, noon, sunset, night, midnight) for the look of a shot.",
+    {
+      action: z.enum(["get", "set"]).optional(),
+      value: z.union([z.number().int().min(0).max(24000), z.string().max(20)]).optional()
+    });
+
+  passthrough("client-replay", "replay",
+    "Render the jobs queued inside a ReplayMod replay (.mcpr with renderQueue.json) without the Replay Viewer, or read the render's status.",
+    {
+      action: z.enum(["render", "status"]).optional(),
+      path: z.string().max(1000).optional().describe("Absolute .mcpr path (render)")
+    }, 120000);
+
+  passthrough("client-world", "world",
+    "Singleplayer worlds of the camera client: list, create (and join, with a name), load, delete.",
+    {
+      action: z.enum(["list", "create", "load", "delete"]),
+      name: z.string().max(100).optional()
+    });
+
+  passthrough("client-resourcepack", "resourcepack",
+    "Resource packs of the camera client: list, enabled, enable or disable by name, reload, load a zip by path.",
+    {
+      action: z.enum(["list", "enabled", "enable", "disable", "reload", "load"]),
+      name: z.string().max(200).optional(),
+      path: z.string().max(1000).optional()
+    });
+
+  factory.registerTool(
+    "client-command",
+    "Run any mc-cli command on the camera client and get its JSON reply: pilot (walk, fight and aim from inside the game, frame by frame), scan, gui, players, events, record, replay, window and the rest (see mc-cli docs/COMMANDS.md). Use it when no client-* tool covers the command. The game's own remote-control permissions still apply.",
+    {
+      command: z.string().regex(/^[a-z][a-z0-9_-]{1,40}$/).describe("mc-cli command name, e.g. pilot"),
+      params: z.record(z.string(), z.unknown()).optional().describe("The command's parameters, as in mc-cli's protocol"),
+      timeoutMs: z.number().int().min(1000).max(600000).optional().describe("How long to wait for the reply (default: the client's socket timeout)")
+    },
+    async ({ command, params, timeoutMs }: { command: string; params?: Record<string, unknown>; timeoutMs?: number }) => {
+      const result = await mcClient.request(command, params ?? {}, timeoutMs ? { timeoutMs } : {});
+      if (!result.ok) {
+        return factory.createErrorResponse(result.error);
+      }
+      return factory.createResponse(JSON.stringify(result.data));
+    },
+    { skipConnectionCheck: true }
+  );
+
   factory.registerTool(
     "client-size",
     "Set the headless camera client's frame size in pixels (mc-cli 1.9+): recordings, captures and the live view take that size at once, without a restart. 1080x1920 for a vertical Short, 1920x1080 or 3840x2160 for YouTube, 2160x3840 for a vertical 4K render.",

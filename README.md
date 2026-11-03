@@ -315,6 +315,11 @@ These tools drive a real Minecraft client (see [Real Client](#real-client-1) bel
 - `client-camera` - Set the client's view direction (`yaw`, `pitch`), or move a render-only camera that leaves the player where it is (`move`): `set`, `orbit`, `path` (keyframes with `fov`), `follow` (keep a moving entity in frame), `attach` (ride with the player's own view), `shot` (`push_in`, `pull_out`, `crane_up`, `crane_down`, `reveal`, `dolly_zoom`), `fov`, `reset`.
 - `client-gamemode` - Switch the client's own gamemode. Takes `mode`.
 - `client-spectate` - Ride another player's view, to capture a screenshot from their viewpoint. Takes optional `player`; call with none to leave spectating.
+- `client-size` - The headless camera's frame size per shot (mc-cli 1.9+), no restart.
+- `client-pilot` - Play steps with the player's own keys like a person: walk, look, place, break, select, follow, fight (rookie/mid/tryhard). Singleplayer or `pilotServers` in the client's `config/mccli.json` only.
+- `client-scan`, `client-players`, `client-chat`, `client-logs`, `client-perf` - Surroundings as text, the tab list and nearby players, chat, the game log, frame rate and memory.
+- `client-shader`, `client-time`, `client-resourcepack`, `client-world`, `client-replay` - Shader packs, client time, resource packs, singleplayer worlds, ReplayMod queue render.
+- `client-command` - Any other mc-cli command with its params, as mc-cli takes them (`docs/COMMANDS.md` in mc-cli).
 - `client-connect` / `client-disconnect` - Connect or disconnect the client from a Minecraft server, independently of the bot.
 - `client-execute` - Run an arbitrary Minecraft command on the client, as an escape hatch.
 - `client-slots` - List the open container's slots: index, GUI position and centre, item. Optional `includeEmpty`.
