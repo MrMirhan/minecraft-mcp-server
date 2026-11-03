@@ -163,7 +163,7 @@ export function registerBedrockClientTools(factory: ToolFactory, client: Bedrock
 
   factory.registerTool(
     "bedrock-client-forms",
-    "The forms the server opened for the real client (Geyser shows Java menus as these): a simple form (buttons), a modal (two buttons) or a custom form (inputs).",
+    "The forms the server opened for the real client (Floodgate/Cumulus forms and Geyser's own forms; a Java chest menu is an inventory, not a form): a simple form (buttons), a modal (two buttons) or a custom form (inputs).",
     { player: z.string().optional() },
     async ({ player }: { player?: string }) => {
       const data = await client.bridge(`/forms${query({ player })}`);

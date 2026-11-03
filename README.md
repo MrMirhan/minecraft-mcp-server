@@ -125,7 +125,7 @@ The `bedrock-*` tools drive a second bot, separate from the Java bot: a Bedrock 
 - `bedrock-status` - Connected or not (and why it left), the server, position, dimension, game mode, health, the tab list, and how many forms are open.
 - `bedrock-send-chat`, `bedrock-read-chat` - Send chat; read the chat, system and translated messages it received.
 - `bedrock-command` - Run a command and get the server's answer. The bot needs the permission, and the server must allow cheats for commands such as `/tp`.
-- `bedrock-forms`, `bedrock-form-respond` - The forms the server opened (Geyser shows Java menus to Bedrock players as forms), and answer one: a button index, true or false, or a custom form's values. No answer closes the form.
+- `bedrock-forms`, `bedrock-form-respond` - The forms the server opened (Floodgate/Cumulus forms and Geyser's own forms; a Java chest menu stays a Bedrock inventory), and answer one: a button index, true or false, or a custom form's values. No answer closes the form.
 
 The bot does not walk and draws nothing: place it with commands on a test server.
 
