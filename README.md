@@ -135,7 +135,7 @@ Checked live against a Bedrock Dedicated Server 1.26.61 (offline mode, cheats on
 
 ## Paper actors
 
-The `actors-*` tools drive [paper-actors](https://github.com/MrMirhan/video-atolyesi/tree/main/agent/paper-actors), a Paper plugin that puts fake players inside a test server: real server players with no client and no connection. They cost far less than a bot each, so they suit crowds; and every action goes through the server's own packet handlers, so plugins see a real player's events (`PlayerInteractEvent`, `BlockBreakEvent`, `InventoryClickEvent`, `PlayerInteractEntityEvent`, `SignChangeEvent`, ...).
+The `actors-*` tools drive [paper-actors](https://github.com/MrMirhan/paper-actors), a Paper plugin that puts fake players inside a test server: real server players with no client and no connection. They cost far less than a bot each, so they suit crowds; and every action goes through the server's own packet handlers, so plugins see a real player's events (`PlayerInteractEvent`, `BlockBreakEvent`, `InventoryClickEvent`, `PlayerInteractEntityEvent`, `SignChangeEvent`, ...).
 
 - `actors-spawn` - One actor, or a crowd (`count` + `prefix`, or `names`) that joins a few per tick; `spread` scatters it, `view` sets each one's view distance.
 - `actors-act` - One action: walking and `goto` (pathfinding), fighting, `select`/`use`/`use_on`/`place`/`break` (digs for as long as survival takes), `interact` with a player or entity, every container click type and drags, `close`, screen `button`, anvil `rename`, villager `trade`, `sign`, `chat` and `command`.

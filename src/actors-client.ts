@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 
 /**
  * A client for paper-actors' control API: fake players on a Paper test server, driven over signed JSON over HTTP.
- * Requests are signed with HMAC-SHA256 (the same scheme as agent/paper-actors/client/actors_client.py): the key is
+ * Requests are signed with HMAC-SHA256 (the same scheme as paper-actors' client/actors_client.py): the key is
  * HMAC(secret, "paper-actors/v1"); the signed text is method, path with query, time, nonce and the body's SHA-256.
  *
  *   PAPER_ACTORS_URL     the API (default http://127.0.0.1:4331; reach a remote server through an SSH tunnel, or set the
