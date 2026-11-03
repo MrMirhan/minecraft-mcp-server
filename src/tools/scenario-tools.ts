@@ -10,7 +10,7 @@ export function registerScenarioTools(
 ): void {
   factory.registerTool(
     "scenario-run",
-    "Run a scenario test with protocol bots: bots join, take steps (command, chat, use_item, click_slot, close_window, wait) and check what arrives within a time window (expect_message, expect_window, expect_slot). Commands, chat and clicks run only when server.testServer is true; on a live server a scenario may only join, open menus with the held item and check. Give the scenario object or a file path; optional junit writes a JUnit report.",
+    "Run a scenario test with protocol bots: bots join, take steps (command, chat, use_item, click_slot with click (left, right, shift, number + hotbar, offhand, middle, drop, drop_stack, double, outside_left/right), drag, window_button, rename, sign, book, trade, beacon, recipe, creative, dialog, chat_click, close_window, wait) and check what arrives within a time window (expect_message, expect_window, expect_slot, expect_dialog, expect_cursor). Commands, chat and clicks run only when server.testServer is true; on a live server a scenario may only join, open menus with the held item and check. Give the scenario object or a file path; optional junit writes a JUnit report.",
     {
       scenario: z.record(z.string(), z.unknown()).optional().describe("The scenario object {name, server{host,port,testServer}, bots[{name}], setup, steps, cleanup}"),
       file: z.string().optional().describe("Path to a scenario JSON file instead"),

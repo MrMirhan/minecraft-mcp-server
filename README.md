@@ -209,6 +209,22 @@ These tools manage the connection itself. They work even when the bot is not con
 - `read-teams` - Read all scoreboard teams, with color, prefix, suffix, and members.
 - `get-resource-pack` - Get the resource pack URL and hash sent by the server, if any.
 
+### Menus and screens
+Every click and screen a player uses, sent with the vanilla client's own packets, so plugins see a real player's events.
+- `window-state` - The open screen (or the player inventory) as data: type, slots with lore and hover texts, the item on the cursor, and the screen's properties (enchanting costs, anvil cost, lectern page).
+- `window-click` - Click a slot: `left`, `right`, `shift`, `shift_right`, `number` (keys 1-9, with `hotbar`), `offhand` (F), `middle` (creative clone), `drop` (Q), `drop_stack` (Ctrl+Q), `double`, `pickup_all`, `outside_left` / `outside_right` (slot -999).
+- `window-drag` - Drag the cursor stack over slots: `left` splits it evenly, `right` puts one in each, `middle` a full stack in each (creative).
+- `window-button` - A screen button: enchanting table 0-2, stonecutter recipe, loom pattern, lectern previous/next/take/page.
+- `anvil-rename` - Type a name in the anvil (search and input menus read it); optional `take`.
+- `sign-write`, `sign-read` - Write either side of a sign, or answer the sign editor a plugin opened; read both sides.
+- `book-read`, `book-write` - Read a book in a slot, in hand or on a lectern, page by page; write pages and optionally sign it.
+- `villager-trades`, `villager-trade` - List the offers of the open trading screen; trade an offer one or more times.
+- `beacon-set-effect` - Choose the beacon's primary and secondary effect.
+- `recipe-book`, `recipe-place` - List the recipe book and click a recipe so the server fills the grid (optionally as many as possible).
+- `creative-set-slot` - Put any item in an inventory slot in creative mode.
+- `dialog-read`, `dialog-respond` - Read and answer dialogs (Minecraft 1.21.6+ and Paper's Dialog API): fill text, boolean, option and number inputs; press a button by index or label; exit.
+- `chat-actions`, `chat-click` - List chat messages with clickable `[buttons]` and hover text; click one (`run_command`, `custom` and `show_dialog` act; `suggest_command` sends only with `send`).
+
 ### Rendering
 - `take-screenshot` - Render the bot's surroundings as a PNG image. Optional `width`, `height`, and `firstPerson`.
 - `render-window` - Render the open inventory or container window as a PNG image styled after the Minecraft GUI.
@@ -284,8 +300,12 @@ The same runs from a shell for CI: `npm run scenario -- shop.json --junit report
  "cleanup": [{"bot": "tester1", "command": "/clear"}]}
 ```
 
-Steps: `command`, `chat`, `use_item`, `click_slot`, `close_window`, `wait` (ms); checks: `expect_message`, `expect_window`,
-`expect_slot` with `within` (default 5000 ms). A failed step skips the rest; cleanup always runs. `command`, `chat` and
+Steps: `command`, `chat`, `use_item`, `click_slot` (with `click`: `right`, `shift`, `number` + `hotbar`, `offhand`, `middle`,
+`drop`, `drop_stack`, `double`, `outside_left`, ...), `drag` `{slots, button}`, `window_button`, `rename` `{name, take}`, `sign`
+`{lines, back, x, y, z}`, `book` `{pages, title}`, `trade` `{index, times}`, `beacon` `{primary, secondary}`, `recipe` `{recipe, all}`,
+`creative` `{slot, item, count}`, `dialog` `{button, inputs, exit}`, `chat_click` `{contains, send}`, `close_window`, `wait` (ms);
+checks: `expect_message`, `expect_window`, `expect_slot`, `expect_dialog` `{title_contains}`, `expect_cursor` `{name_contains}`
+with `within` (default 5000 ms). Every screen step is a write, so it needs an allowlisted test server. A failed step skips the rest; cleanup always runs. `command`, `chat` and
 `click_slot`, `use_item` and `close_window` can change server state, so a scenario with them is refused unless
 `server.testServer` is true **and** its exact address is in `SCENARIO_TEST_SERVERS`. On a live server a scenario
 may only join, wait and read assertions. Bots log in offline-mode.

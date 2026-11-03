@@ -9,12 +9,28 @@ import { z } from 'zod';
 const botRef = z.object({ bot: z.string() });
 const within = z.coerce.number().int().positive().max(120_000).optional();
 
+const CLICKS = ['left', 'right', 'shift', 'shift_right', 'number', 'offhand', 'middle', 'drop', 'drop_stack', 'pickup_all', 'double', 'outside_left', 'outside_right'] as const;
+
 const actionStep = botRef.extend({
   command: z.string().optional(),
   chat: z.string().optional(),
   wait: z.coerce.number().int().nonnegative().max(120_000).optional(),
   use_item: z.boolean().optional(),
   click_slot: z.coerce.number().int().optional(),
+  /** The click type for click_slot (default left); outside_left/outside_right need no slot. */
+  click: z.enum(CLICKS).optional(),
+  hotbar: z.coerce.number().int().min(1).max(9).optional(),
+  drag: z.object({ slots: z.array(z.coerce.number().int()).min(1), button: z.enum(['left', 'right', 'middle']).optional() }).optional(),
+  window_button: z.coerce.number().int().min(0).optional(),
+  rename: z.object({ name: z.string().max(50), take: z.boolean().optional() }).optional(),
+  sign: z.object({ lines: z.array(z.string()).max(4), back: z.boolean().optional(), x: z.coerce.number().int().optional(), y: z.coerce.number().int().optional(), z: z.coerce.number().int().optional() }).optional(),
+  book: z.object({ pages: z.array(z.string()).min(1).max(100), title: z.string().max(32).optional() }).optional(),
+  trade: z.object({ index: z.coerce.number().int().min(0), times: z.coerce.number().int().min(1).max(64).optional(), all: z.boolean().optional() }).optional(),
+  beacon: z.object({ primary: z.string(), secondary: z.string().optional() }).optional(),
+  recipe: z.object({ recipe: z.union([z.coerce.number().int(), z.string()]), all: z.boolean().optional() }).optional(),
+  creative: z.object({ slot: z.coerce.number().int().min(0).max(44), item: z.string().optional(), count: z.coerce.number().int().min(1).max(64).optional() }).optional(),
+  dialog: z.object({ button: z.union([z.coerce.number().int().min(0), z.string()]).optional(), inputs: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(), exit: z.boolean().optional() }).optional(),
+  chat_click: z.object({ contains: z.string().optional(), send: z.string().optional() }).optional(),
   close_window: z.boolean().optional()
 });
 
@@ -26,7 +42,9 @@ const expectStep = z.object({
     name_contains: z.string().optional(),
     lore_contains: z.string().optional(),
     within
-  }).optional()
+  }).optional(),
+  expect_dialog: botRef.extend({ title_contains: z.string(), within }).optional(),
+  expect_cursor: botRef.extend({ name_contains: z.string(), within }).optional()
 });
 
 const step = z.union([expectStep.strict(), actionStep.strict()]);
@@ -49,8 +67,29 @@ export interface ScenarioWindow {
   slots: Array<{ name: string; displayName?: string; lore?: string[] } | null>;
 }
 
+/** A screen action beyond a left click; a ScenarioBot with `gui` performs it with the game's own packets. */
+export type GuiStep =
+  | { kind: 'click'; slot?: number; type: (typeof CLICKS)[number]; hotbar?: number }
+  | { kind: 'drag'; slots: number[]; button?: 'left' | 'right' | 'middle' }
+  | { kind: 'button'; button: number }
+  | { kind: 'rename'; name: string; take?: boolean }
+  | { kind: 'sign'; lines: string[]; back?: boolean; x?: number; y?: number; z?: number }
+  | { kind: 'book'; pages: string[]; title?: string }
+  | { kind: 'trade'; index: number; times?: number; all?: boolean }
+  | { kind: 'beacon'; primary: string; secondary?: string }
+  | { kind: 'recipe'; recipe: number | string; all?: boolean }
+  | { kind: 'creative'; slot: number; item?: string; count?: number }
+  | { kind: 'dialog'; button?: number | string; inputs?: Record<string, unknown>; exit?: boolean }
+  | { kind: 'chat_click'; contains?: string; send?: string };
+
 /** The part of a mineflayer bot a scenario uses. */
 export interface ScenarioBot {
+  /** Screens beyond a left click; without it, only click_slot with a left click works. */
+  gui?(step: GuiStep): Promise<string>;
+  /** The open dialog's title, or null. */
+  dialogTitle?(): string | null;
+  /** The item on the cursor ("name x1 \"Custom\""), or null. */
+  cursor?(): string | null;
   username: string;
   currentWindow: ScenarioWindow | null;
   chat(line: string): void;
@@ -82,7 +121,25 @@ export interface ScenarioReport {
 const DEFAULT_WITHIN = 5000;
 
 function writes(a: Action): boolean {
-  return a.command !== undefined || a.chat !== undefined || a.click_slot !== undefined || a.use_item === true || a.close_window === true;
+  return a.command !== undefined || a.chat !== undefined || a.click_slot !== undefined || a.click !== undefined || a.use_item === true || a.close_window === true
+    || guiStep(a) !== undefined;
+}
+
+/** The screen action of a step, if it has one other than a plain left click. */
+function guiStep(a: Action): GuiStep | undefined {
+  if (a.click !== undefined) return { kind: 'click', slot: a.click_slot, type: a.click, hotbar: a.hotbar };
+  if (a.drag) return { kind: 'drag', ...a.drag };
+  if (a.window_button !== undefined) return { kind: 'button', button: a.window_button };
+  if (a.rename) return { kind: 'rename', ...a.rename };
+  if (a.sign) return { kind: 'sign', ...a.sign };
+  if (a.book) return { kind: 'book', ...a.book };
+  if (a.trade) return { kind: 'trade', ...a.trade };
+  if (a.beacon) return { kind: 'beacon', ...a.beacon };
+  if (a.recipe) return { kind: 'recipe', ...a.recipe };
+  if (a.creative) return { kind: 'creative', ...a.creative };
+  if (a.dialog) return { kind: 'dialog', ...a.dialog };
+  if (a.chat_click) return { kind: 'chat_click', ...a.chat_click };
+  return undefined;
 }
 
 /** Validates a scenario; throws with a clear message when it would change a server not marked testServer. */
@@ -92,7 +149,7 @@ export function parseScenario(input: unknown): Scenario {
   const allowed = new Set((process.env.SCENARIO_TEST_SERVERS ?? '').split(',').map((v) => v.trim()).filter(Boolean));
   const all: Array<Step> = [...(s.setup ?? []), ...s.steps, ...(s.cleanup ?? [])];
   for (const st of all) {
-    const ref = 'bot' in st ? st.bot : (st.expect_message ?? st.expect_window ?? st.expect_slot)?.bot;
+    const ref = 'bot' in st ? st.bot : (st.expect_message ?? st.expect_window ?? st.expect_slot ?? st.expect_dialog ?? st.expect_cursor)?.bot;
     if (ref !== undefined && !names.has(ref)) throw new Error(`step names bot "${ref}", which is not in bots`);
     if ('bot' in st && writes(st as Action)) {
       if (!s.server.testServer) {
@@ -110,7 +167,26 @@ function describe(st: Step): string {
   if ('expect_message' in st && st.expect_message) return `expect message "${st.expect_message.contains}"`;
   if ('expect_window' in st && st.expect_window) return `expect window "${st.expect_window.title_contains}"`;
   if ('expect_slot' in st && st.expect_slot) return `expect slot ${st.expect_slot.slot}`;
+  if ('expect_dialog' in st && st.expect_dialog) return `expect dialog "${st.expect_dialog.title_contains}"`;
+  if ('expect_cursor' in st && st.expect_cursor) return `expect cursor "${st.expect_cursor.name_contains}"`;
   const a = st as Action;
+  const g = guiStep(a);
+  if (g) {
+    switch (g.kind) {
+      case 'click': return `${a.bot}: ${g.type} click${g.slot !== undefined ? ` slot ${g.slot}` : ''}${g.hotbar ? ` key ${g.hotbar}` : ''}`;
+      case 'drag': return `${a.bot}: ${g.button ?? 'left'} drag over ${g.slots.join(', ')}`;
+      case 'button': return `${a.bot}: screen button ${g.button}`;
+      case 'rename': return `${a.bot}: anvil name "${g.name}"`;
+      case 'sign': return `${a.bot}: write sign`;
+      case 'book': return `${a.bot}: write book${g.title ? ` "${g.title}"` : ''}`;
+      case 'trade': return `${a.bot}: trade ${g.index}`;
+      case 'beacon': return `${a.bot}: beacon ${g.primary}`;
+      case 'recipe': return `${a.bot}: place recipe ${g.recipe}`;
+      case 'creative': return `${a.bot}: creative slot ${g.slot}`;
+      case 'dialog': return `${a.bot}: dialog ${g.exit ? 'exit' : `button ${g.button}`}`;
+      case 'chat_click': return `${a.bot}: click chat${g.contains ? ` "${g.contains}"` : ''}`;
+    }
+  }
   if (a.command !== undefined) return `${a.bot}: ${a.command}`;
   if (a.chat !== undefined) return `${a.bot} says "${a.chat}"`;
   if (a.wait !== undefined) return `wait ${a.wait} ms`;
@@ -184,12 +260,32 @@ export async function runScenario(s: Scenario, createBot: (name: string, server:
         }, e.within ?? DEFAULT_WITHIN, `slot ${e.slot} does not match within ${e.within ?? DEFAULT_WITHIN} ms`);
         return;
       }
+      if ('expect_dialog' in st && st.expect_dialog) {
+        const e = st.expect_dialog;
+        const bot = bots.get(e.bot)!;
+        if (!bot.dialogTitle) throw new Error('this bot cannot read dialogs');
+        await until(() => (bot.dialogTitle!()?.includes(e.title_contains) ? true : undefined), e.within ?? DEFAULT_WITHIN,
+          `no dialog titled "${e.title_contains}" within ${e.within ?? DEFAULT_WITHIN} ms (open: ${bot.dialogTitle() ?? 'none'})`);
+        return;
+      }
+      if ('expect_cursor' in st && st.expect_cursor) {
+        const e = st.expect_cursor;
+        const bot = bots.get(e.bot)!;
+        if (!bot.cursor) throw new Error('this bot cannot read the cursor');
+        await until(() => (bot.cursor!()?.includes(e.name_contains) ? true : undefined), e.within ?? DEFAULT_WITHIN,
+          `the cursor does not hold "${e.name_contains}" within ${e.within ?? DEFAULT_WITHIN} ms (holds: ${bot.cursor() ?? 'nothing'})`);
+        return;
+      }
       const a = st as Action;
       const bot = bots.get(a.bot)!;
       if (a.command !== undefined) bot.chat(a.command.startsWith('/') ? a.command : `/${a.command}`);
       if (a.chat !== undefined) bot.chat(a.chat);
       if (a.use_item) bot.activateItem();
-      if (a.click_slot !== undefined) await bot.clickWindow(a.click_slot, 0, 0);
+      const g = guiStep(a);
+      if (g) {
+        if (!bot.gui) throw new Error('this bot cannot do screen actions other than a left click');
+        await bot.gui(g);
+      } else if (a.click_slot !== undefined) await bot.clickWindow(a.click_slot, 0, 0);
       if (a.close_window && bot.currentWindow) bot.closeWindow(bot.currentWindow);
       if (a.wait !== undefined) await sleep(a.wait);
     };

@@ -1,6 +1,6 @@
 import test from 'ava';
 import { EventEmitter } from 'node:events';
-import { parseScenario, runScenario, toJUnit, type ScenarioBot } from '../src/scenario/runner.js';
+import { parseScenario, runScenario, toJUnit, type GuiStep, type ScenarioBot } from '../src/scenario/runner.js';
 
 class FakeBot extends EventEmitter implements ScenarioBot {
   sent: string[] = [];
@@ -94,4 +94,64 @@ test('a missing message fails the step after its window and still runs cleanup',
   const xml = toJUnit(report);
   t.true(xml.includes('<testsuite name="shop"'));
   t.true(xml.includes('<failure'));
+});
+
+class GuiBot extends FakeBot {
+  steps: GuiStep[] = [];
+  dialog: string | null = null;
+  carried: string | null = null;
+  async gui(step: GuiStep): Promise<string> {
+    this.steps.push(step);
+    if (step.kind === 'chat_click') setTimeout(() => { this.dialog = 'Daily reward'; }, 20);
+    if (step.kind === 'click' && step.type === 'right') this.carried = 'diamond x32';
+    if (step.kind === 'dialog') this.dialog = null;
+    return 'ok';
+  }
+  dialogTitle(): string | null { return this.dialog; }
+  cursor(): string | null { return this.carried; }
+}
+
+test('screen steps are writes: refused unless the server is an allowlisted test server', (t) => {
+  for (const step of [
+    { bot: 'tester', click: 'outside_left' },
+    { bot: 'tester', drag: { slots: [1, 2] } },
+    { bot: 'tester', rename: { name: 'x' } },
+    { bot: 'tester', sign: { lines: ['a'] } },
+    { bot: 'tester', trade: { index: 0 } },
+    { bot: 'tester', dialog: { button: 0 } },
+    { bot: 'tester', chat_click: { contains: 'Accept' } }
+  ]) {
+    t.throws(() => parseScenario({ ...base, steps: [step] }), undefined, JSON.stringify(step));
+  }
+  t.notThrows(() => parseScenario({ ...base, steps: [{ expect_dialog: { bot: 'tester', title_contains: 'Shop' } }, { expect_cursor: { bot: 'tester', name_contains: 'diamond' } }] }));
+});
+
+test('screen steps run through the bot\'s gui, and dialogs and the cursor can be expected', async (t) => {
+  const scenario = parseScenario({
+    ...base,
+    server: { host: 'h', port: 1, testServer: true },
+    steps: [
+      { bot: 'tester', click_slot: 4, click: 'right' },
+      { expect_cursor: { bot: 'tester', name_contains: 'diamond', within: 200 } },
+      { bot: 'tester', drag: { slots: [10, 11, 12], button: 'right' } },
+      { bot: 'tester', click_slot: 9, click: 'number', hotbar: 2 },
+      { bot: 'tester', chat_click: { contains: 'Claim' } },
+      { expect_dialog: { bot: 'tester', title_contains: 'Daily', within: 500 } },
+      { bot: 'tester', dialog: { button: 'Claim', inputs: { amount: 2 } } }
+    ]
+  });
+  let bot: GuiBot | undefined;
+  const report = await runScenario(scenario, (name) => (bot = new GuiBot(name)));
+  t.true(report.passed, JSON.stringify(report.results));
+  t.deepEqual(bot?.steps.map((s) => s.kind), ['click', 'drag', 'click', 'chat_click', 'dialog']);
+  t.deepEqual(bot?.steps[2], { kind: 'click', slot: 9, type: 'number', hotbar: 2 });
+  t.true(report.results.some((r) => r.name === 'tester: right drag over 10, 11, 12'));
+  t.deepEqual(bot?.clicked, []);
+});
+
+test('a screen step fails clearly on a bot that only clicks left', async (t) => {
+  const scenario = parseScenario({ ...base, server: { host: 'h', port: 1, testServer: true }, steps: [{ bot: 'tester', rename: { name: 'x' } }] });
+  const report = await runScenario(scenario, (name) => new FakeBot(name));
+  t.false(report.passed);
+  t.true(report.results[0].message?.includes('cannot do screen actions'));
 });
