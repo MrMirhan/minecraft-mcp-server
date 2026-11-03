@@ -243,7 +243,7 @@ RUN { \
 # never baked in: mount them and set MCCLI_BEDROCK_GAME (and MCCLI_BEDROCK_CREDENTIALS). The client reaches a
 # server through mc-cli's bridge, which runs in another container (docker/bedrock/compose.yml).
 ARG BEDROCK_CLIENT=false
-ARG BEDROCK_MCCLI_REF=96c7dbc
+ARG BEDROCK_MCCLI_REF=20564cb
 RUN if [ "${BEDROCK_CLIENT}" = "true" ]; then \
       apt-get update \
       && apt-get install -y --no-install-recommends gnupg curl ca-certificates \

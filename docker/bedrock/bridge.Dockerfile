@@ -2,7 +2,7 @@
 # signed in with Microsoft, and serves what it sees on a control API (bedrock-client-state and friends).
 FROM node:24-bookworm-slim
 ARG MCCLI_REPO=MrMirhan/mc-cli
-ARG MCCLI_REF=96c7dbc
+ARG MCCLI_REF=20564cb
 ADD https://github.com/${MCCLI_REPO}/archive/${MCCLI_REF}.tar.gz /tmp/mccli.tar.gz
 # SKIP_BUILD: raknet-native's prebuilt binary is linked by the package's postinstall; no cmake.
 RUN mkdir -p /opt/mccli \

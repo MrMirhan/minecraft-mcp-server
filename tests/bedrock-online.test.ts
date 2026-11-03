@@ -54,6 +54,8 @@ test('one account\'s token files, owner-only, whatever player name a connection 
   const cache = auth.cacheFor('work');
   await cache({ cacheName: 'xbl', username: 'Steve' }).setCached({ a: 1 });
   t.is(fs.statSync(path.join(dir, 'work_xbl-cache.json')).mode & 0o777, 0o600);
+  await auth.cacheFor()({ cacheName: 'live' }).setCached({ b: 2 });
+  t.true(fs.existsSync(path.join(dir, '1b83eb_live-cache.json')), 'the default account uses the names mc-cli\'s first login wrote');
   t.deepEqual(await cache({ cacheName: 'xbl', username: '2535400' }).getCached(), { a: 1 });
   t.throws(() => cache({ cacheName: 'nope' }), { message: /Unknown token cache/ });
   t.throws(() => auth.cacheFor('../x'), { message: /account name/ });

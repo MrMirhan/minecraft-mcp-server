@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +8,7 @@ import path from 'node:path';
  * Microsoft (Xbox Live) sign-in for Bedrock: a device code the model shows the person, who enters it at
  * microsoft.com/link; the tokens are cached and renew themselves. One cache, keyed by an account name, serves
  * the Bedrock bot and mc-cli's bridge (`mccli bedrock bridge --auth microsoft`) when both use one folder:
- * the files are `<account>_<cache>-cache.json`, the layout mc-cli's bedrock/auth.mjs writes.
+ * the files are `<prefix>_<cache>-cache.json` (see prefixFor), the layout mc-cli's bedrock/auth.mjs writes.
  */
 
 const requireCjs = createRequire(import.meta.url);
@@ -73,6 +74,15 @@ export function checkAccount(account: string): string {
   return account;
 }
 
+/**
+ * The file name prefix of an account's tokens, as mc-cli's bridge names them: the default account keeps the
+ * name `mccli bedrock login` wrote first (prismarine-auth's hash of "mccli-bridge"); others use their name.
+ */
+export function prefixFor(account = 'default'): string {
+  checkAccount(account);
+  return account === 'default' ? createHash('sha1').update('mccli-bridge', 'binary').digest('hex').slice(0, 6) : account;
+}
+
 export class BedrockAuth {
   private lib: AuthLib | null = null;
   private logins = new Map<string, LoginState & { done?: Promise<void> }>();
@@ -91,12 +101,12 @@ export class BedrockAuth {
 
   /** The account's token files, whatever player name a connection asks with. */
   cacheFor(account = 'default'): CacheFactory {
-    checkAccount(account);
+    const prefix = prefixFor(account);
     const { FileCache } = this.auth();
     fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     return ({ cacheName }) => {
       if (!CACHE_IDS.includes(cacheName)) throw new Error(`Unknown token cache '${cacheName}'`);
-      const file = path.join(this.dir, `${account}_${cacheName}-cache.json`);
+      const file = path.join(this.dir, `${prefix}_${cacheName}-cache.json`);
       const cache = new FileCache(file);
       // Tokens are secrets: owner-only files, whichever way the cache writes them.
       for (const method of ['setCached', 'reset'] as const) {
@@ -183,11 +193,11 @@ export class BedrockAuth {
   }
 
   logout(account = 'default'): number {
-    checkAccount(account);
+    const prefix = prefixFor(account);
     this.logins.delete(account);
     let removed = 0;
     for (const id of CACHE_IDS) {
-      const file = path.join(this.dir, `${account}_${id}-cache.json`);
+      const file = path.join(this.dir, `${prefix}_${id}-cache.json`);
       if (fs.existsSync(file)) {
         fs.rmSync(file, { force: true });
         removed++;

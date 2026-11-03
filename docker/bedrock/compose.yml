@@ -5,9 +5,10 @@
 # - ./bedrock/game: mcpelauncher's data folder (versions/<version>/, mods/mcpelauncher-updates/), downloaded once
 #   for a Google account that owns Minecraft. ./bedrock/credentials: its licence and sign-in files, laid out like
 #   a home folder. Neither is ever baked into an image. See mc-cli's docs/BEDROCK.md.
-# - BEDROCK_AUTH=offline (default): the server allows offline players. BEDROCK_AUTH=microsoft: the bridge joins as
-#   a Microsoft account. Sign it in once from the MCP side with the bedrock-login tool (the AI gives the person a
-#   code for microsoft.com/link); the bridge watches the shared bedrock-auth volume and goes on by itself.
+# - BEDROCK_AUTH=auto (default): the bridge joins as the Microsoft account signed in into the shared bedrock-auth
+#   volume, offline when there is none. Sign it in once from the MCP side with the bedrock-login tool (the AI gives
+#   the person a code for microsoft.com/link); restart the bridge to pick a new sign-in up in auto. offline: always
+#   offline (the server allows offline players). microsoft: always signed in; the bridge waits for a sign-in.
 # - The bridge must be a different container from the client, on the network of the client's default route: the
 #   client looks for LAN worlds there only.
 services:
@@ -43,7 +44,7 @@ services:
       - --name
       - ${BEDROCK_LAN_NAME:-Test server}
       - --auth
-      - ${BEDROCK_AUTH:-offline}
+      - ${BEDROCK_AUTH:-auto}
       - --auth-dir
       - /bedrock-auth
       - --control

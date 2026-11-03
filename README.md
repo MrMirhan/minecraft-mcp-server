@@ -142,13 +142,13 @@ The `bedrock-client-*` tools drive the real Bedrock client on Linux (mcpelaunche
 - `bedrock-bridge-status` - The bridge: the server it relays to, offline or `microsoft` and the account, a pending sign-in code, its clients.
 - `bedrock-client-state`, `-chat-log`, `-forms`, `-form-respond` - What the bridge sees of the client's game: world, position, dimension, game mode, health, inventory by item name, title, tab list, nearby players, chat and open forms; and answering a form.
 
-The bridge is offline (the server allows offline players) or `--auth microsoft`. For the latter, sign in once with `bedrock-login`: the bridge watches the shared token folder and goes on by itself.
+The bridge joins the server as the Microsoft account signed in into its token folder, or offline when there is none (`--auth auto`, its default); `--offline` / `--auth microsoft` choose explicitly. Sign in once with `bedrock-login` into a folder the bridge shares: with `--auth microsoft` a waiting bridge goes on by itself; in `auto` restart it to pick the sign-in up.
 
 **Docker.** `docker build --build-arg BEDROCK_CLIENT=true .` adds mcpelauncher (from minecraft-linux's apt repository), xdotool, x11-utils, ImageMagick and mc-cli's CLI; the client draws on its own Xvfb display (`BEDROCK_DISPLAY`, default `:98`). The game files are licensed per Google account and never baked in. `docker/bedrock/compose.yml` runs the MCP server with the client next to the bridge (its own image, `docker/bedrock/bridge.Dockerfile`), on one network, with a shared token volume:
 
 ```bash
 cd docker/bedrock
-BEDROCK_SERVER=play.example.net:19132 BEDROCK_AUTH=microsoft MCP_AUTH_TOKEN=... BEDROCK_BRIDGE_TOKEN=... docker compose up --build
+BEDROCK_SERVER=play.example.net:19132 MCP_AUTH_TOKEN=... BEDROCK_BRIDGE_TOKEN=... docker compose up --build
 ```
 
 | Variable | Effect |
