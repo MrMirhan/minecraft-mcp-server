@@ -85,6 +85,12 @@ but never choppy. Use it when there is no GPU or when shaders are on. `motionBlu
 To give the client a GPU, pass the device in. A Swarm service cannot do this, so use compose:
 `devices: ["/dev/dri:/dev/dri"]`, plus `group_add` for the host's `render` group.
 
+## Live view
+
+`GET /live?fps=10&width=640` streams the camera client's screen as MJPEG (multipart/x-mixed-replace), behind the same
+bearer token. An `<img>` can show it, so a workshop on another machine can watch the camera. ffmpeg grabs the Xvfb
+screen only while someone watches, with at most three viewers. The reply is 503 when the client is not running.
+
 ## Recordings over HTTP
 
 `client-record` with a bare file name (`path: "shot-1.mp4"`) saves the video in the recordings folder (`MC_RECORDINGS_DIR`,

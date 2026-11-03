@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import { recordingPath } from "./recordings.js";
+import { serveLive } from "./live.js";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -144,6 +145,15 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
   const server = http.createServer((req, res) => {
     const url = req.url ?? "";
     const pathname = url.split("?")[0];
+
+    if (pathname === "/live") {
+      if (!isAuthorized(req)) {
+        sendJson(res, 401, jsonRpcError(-32001, "Unauthorized: missing or invalid bearer token"));
+        return;
+      }
+      serveLive(req, res, log);
+      return;
+    }
 
     if (pathname.startsWith("/files/")) {
       if (!isAuthorized(req)) {
