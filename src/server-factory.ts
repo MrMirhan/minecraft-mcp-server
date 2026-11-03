@@ -28,6 +28,8 @@ import { registerBedrockTools } from './tools/bedrock-tools.js';
 import { BedrockAuth } from './bedrock-auth.js';
 import { BedrockClient } from './bedrock-client.js';
 import { registerBedrockClientTools } from './tools/bedrock-client-tools.js';
+import { ActorsClient } from './actors-client.js';
+import { registerActorsTools } from './tools/actors-tools.js';
 import { TOOLSETS, type Toolset } from './config.js';
 
 // The HTTP transport builds a fresh McpServer per session, but only one real Minecraft
@@ -37,6 +39,7 @@ let sharedMcClient: McClient | null = null;
 let sharedBedrockBot: BedrockBot | null = null;
 let sharedBedrockAuth: BedrockAuth | null = null;
 let sharedBedrockClient: BedrockClient | null = null;
+let sharedActorsClient: ActorsClient | null = null;
 
 const SERVER_NAME = "minecraft-mcp-server";
 const SERVER_VERSION = "2.0.4";
@@ -79,6 +82,8 @@ Microsoft sign-in: bedrock-login answers a code and a link. Give both to the per
 
 const BEDROCK_CLIENT_INSTRUCTIONS = `The bedrock-client-* tools drive the real Bedrock client (mcpelauncher through mc-cli): launch it, look at it with screenshots, click, press keys, type and chat. It reaches a server through mc-cli's bridge, which shows the server to it as a LAN world (bedrock-client-join) and connects offline or signed in with Microsoft (bedrock-bridge-status says which). The bridge also reads the game for you: bedrock-client-state (position, health, inventory, forms), bedrock-client-chat-log and bedrock-client-forms; prefer them to reading a screenshot. Check every click or key with a screenshot: a slow client can miss input.`;
 
+const ACTORS_INSTRUCTIONS = `The actors-* tools drive paper-actors: fake players inside a Paper TEST server (the plugin refuses servers not in its allowed-servers). They are server-side players with no client, cheap enough for crowds: use them for plugin tests (menus, shops, blocks, commands: plugins see a real player's events), load tests (actors-spawn with count, then actors-metrics) and filmed scenes (actors-scene-play). Check what an action did with actors-actor or actors-events. For a real client's view use the client-* tools; for a network connection (login, proxies, packets) use the mineflayer bot.`;
+
 const VIEWER_INSTRUCTIONS = `start-viewer opens a live browser view of the bot with a UI overlay, and returns the URL. It follows the bot across reconnects and server switches.`;
 
 /** The server's instructions for the tool sets it offers. */
@@ -89,6 +94,7 @@ export function serverInstructions(toolsets: readonly Toolset[]): string {
   if (toolsets.includes('viewer')) parts.push(VIEWER_INSTRUCTIONS);
   if (toolsets.includes('bedrock')) parts.push(BEDROCK_INSTRUCTIONS);
   if (toolsets.includes('bedrock-client')) parts.push(BEDROCK_CLIENT_INSTRUCTIONS);
+  if (toolsets.includes('actors')) parts.push(ACTORS_INSTRUCTIONS);
   return parts.join('\n\n');
 }
 
@@ -138,6 +144,10 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
   if (toolsets.includes('bedrock-client')) {
     sharedBedrockClient ??= new BedrockClient();
     registerBedrockClientTools(factory, sharedBedrockClient);
+  }
+  if (toolsets.includes('actors')) {
+    sharedActorsClient ??= new ActorsClient();
+    registerActorsTools(factory, sharedActorsClient);
   }
 
   return server;
