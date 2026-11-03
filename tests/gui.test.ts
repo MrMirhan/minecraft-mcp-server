@@ -228,7 +228,7 @@ test('anvil, sign, screen buttons and beacon send their own packets', async (t) 
   const [beacon] = writes(bot, 'set_beacon_effect');
   t.is(beacon.primary_effect, registry.effectsByName.Haste.id);
   t.is(beacon.secondary_effect, registry.effectsByName.Regeneration.id);
-  t.is(bot.currentWindow, null, 'the screen closes after Done, as in vanilla');
+  t.is(bot.currentWindow as unknown, null, 'the screen closes after Done, as in vanilla');
 });
 
 test('villager trades are read from trade_list and a trade selects the offer then takes the result', async (t) => {
