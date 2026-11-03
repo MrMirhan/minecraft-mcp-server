@@ -3,6 +3,7 @@ import pathfinderPkg from 'mineflayer-pathfinder';
 const { pathfinder, Movements } = pathfinderPkg;
 import minecraftData from 'minecraft-data';
 import { WebViewer, attachUiState } from './web-viewer.js';
+import { attachGuiState } from './gui/gui-core.js';
 
 const SUPPORTED_MINECRAFT_VERSION = '26.1.2';
 
@@ -77,6 +78,7 @@ export class BotConnection {
 
     const bot = mineflayer.createBot(botOptions);
     attachUiState(bot);
+    attachGuiState(bot);
     this.registerEventHandlers(bot);
     return bot;
   }

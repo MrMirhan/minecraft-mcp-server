@@ -13,6 +13,7 @@ import { registerCraftingTools } from './tools/crafting-tools.js';
 import { registerFurnaceTools } from './tools/furnace-tools.js';
 import { registerConnectionTools } from './tools/connection-tools.js';
 import { registerUiTools } from './tools/ui-tools.js';
+import { registerGuiTools } from './tools/gui-tools.js';
 import { registerRenderTools } from './tools/render-tools.js';
 import { registerStatusTools } from './tools/status-tools.js';
 import { registerCompositeTools } from './tools/composite-tools.js';
@@ -46,6 +47,9 @@ Start of a session:
 Choosing between overlapping tools:
 - read-window returns exact slot contents: item name, count, display name, lore and CustomModelData. Use it to check whether a value is correct.
 - Prefer a composite tool over a chain of low-level calls. collect-blocks replaces find-blocks plus move-to-position plus dig-block repeated per block. scan-area replaces many find-blocks calls.
+- window-state is read-window plus the cursor item, empty slots, hover texts and the screen's properties; call it after a click to see the result.
+- Menus: window-click (left, right, shift, number keys, offhand, middle, drop, double, outside), window-drag, window-button (enchanting, stonecutter, loom, lectern), anvil-rename, sign-write, book-read/book-write, villager-trades/villager-trade, beacon-set-effect, recipe-book/recipe-place, creative-set-slot. They send the game's own packets, so plugins see a real player's events.
+- dialog-read and dialog-respond answer dialogs (1.21.6+ and Paper's Dialog API). chat-actions and chat-click read and click [buttons] in chat. A suggest_command or open_url click sends nothing to the server; only run_command, custom and dialog buttons do.
 - read-scoreboard, read-tablist, read-bossbar, read-title and read-teams keep the raw section-sign colour codes. The codes are the answer when checking colours, so do not strip them.
 
 Long-running actions:
@@ -105,6 +109,7 @@ export function createMcpServer(connection: BotConnection, messageStore: Message
     registerFurnaceTools(factory, getBot, actionManager);
     registerConnectionTools(factory, connection);
     registerUiTools(factory, getBot);
+    registerGuiTools(factory, getBot);
     registerStatusTools(factory, getBot);
     registerCompositeTools(factory, getBot, actionManager);
     registerControlTools(factory, getBot, actionManager);

@@ -8,7 +8,7 @@ This guide is for someone who runs this server and directs the bot through it. I
 
 **ActionManager** (`src/action-manager.ts`) is a single shared object. It tracks one long-running action at a time. Ten tools run through it: `move-to-position`, `move-in-direction`, `place-block`, `dig-block`, `fly-to`, `craft-item`, `smelt-item`, `collect-blocks`, `goto-player`, and `follow-player`. The `stop` and `get-current-action` tools read and cancel through this same object. See "Long-running actions" below for the exact rules.
 
-**Tool modules** (`src/tools/*.ts`) group the 44 tools by purpose, from movement and blocks to crafting, UI state, and rendering. See [README.md](README.md) for the full list by category. Each module registers its tools on the same MCP server. None of them call each other directly.
+**Tool modules** (`src/tools/*.ts`) group the tools by purpose, from movement and blocks to crafting, menus, UI state, and rendering (59 in the `bot` tool set). See [README.md](README.md) for the full list by category. Each module registers its tools on the same MCP server. None of them call each other directly.
 
 **The web viewer** (`src/web-viewer.ts`) is a small HTTP server, separate from the MCP connection. It shows the bot's 3D world with a scoreboard, boss bar, title, tab list, and window overlay. It starts and stops on its own schedule through `start-viewer` and `stop-viewer`, not tied to any single tool call. See "The live viewer" below.
 
@@ -42,6 +42,16 @@ The individual calls (`get-position`, `detect-gamemode`, `list-inventory`, and s
 `collect-blocks`, `goto-player`, `follow-player`, and `scan-area` each run a small loop internally: find a target, path to it, act, and repeat. Each one reports why it stopped: timeout, distance exhausted, or done. Use a composite tool for a well-defined chore with no decisions mid-task, such as mining ten blocks or walking to a player.
 
 A hand-built chain of `find-blocks`, `move-to-position`, and `dig-block` gives more control. Use it when you need to inspect results between steps, react to surprises, or target blocks a composite tool's fixed logic does not fit. `collect-blocks`, for example, always searches outward from the bot's current position, not a fixed area.
+
+## Menus and screens
+
+`src/gui/` holds one implementation of every screen a player uses, shared by the MCP tools (`src/tools/gui-tools.ts`) and the scenario bots (`src/scenario/mineflayer-bot.ts`). Each action is the packet the vanilla client sends, so a plugin sees the same event a player makes: `InventoryClickEvent` with the same `ClickType`, `InventoryDragEvent`, `PrepareAnvilEvent`, `SignChangeEvent`, `PlayerEditBookEvent`, `TradeSelectEvent`, `PlayerCustomClickEvent`, and so on.
+
+- **Clicks.** `window-click` sends `window_click` with a stateId the server never issued. The server applies the click and answers with the whole window, so the bot's copy of the window is exact afterwards, whatever the click did. mineflayer's own `clickWindow` predicts the result instead, and refuses drags and the offhand swap. Before 1.17.1 there is no stateId, so the tool falls back to mineflayer's path there.
+- **Drags** are one start packet, one per slot and one end packet (`QUICK_CRAFT`). The cursor must hold the stack first.
+- **What mineflayer does not keep** is tracked from packets in `attachGuiState`: dialogs (`show_dialog`, `clear_dialog`), the sign editor (`open_sign_entity`), opened books, window properties (`craft_progress_bar`: enchanting costs, anvil cost, lectern page), villager offers (`trade_list`), the recipe book (`recipe_book_add`, or `unlock_recipes` before 1.21.2) and the click and hover events of the last 100 chat messages.
+- **Dialogs** (1.21.6+) are parsed from their NBT. A button runs its action: a command is sent as a command, `dynamic/run_command` fills `$(key)` from the inputs, and `custom` and `dynamic/custom` send `custom_click_action` with the inputs as NBT (text as a string, boolean as a byte, number as a float, option as its id). A dialog the server names from its registry is known only by its id, because the bot does not keep the registry.
+- **Client-side actions** (`open_url`, `copy_to_clipboard`, `suggest_command` and `change_page`) tell the server nothing, so the tools report them instead of sending anything. `chat-click` sends a suggested command only when it is given `send`.
 
 ## Long-running actions
 
