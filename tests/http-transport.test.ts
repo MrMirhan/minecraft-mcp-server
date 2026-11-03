@@ -184,3 +184,23 @@ test.serial('GET /files serves a recording to an authorized caller only, and DEL
   t.is((await fetch(`${files}/shot-1.mp4`, { method: 'DELETE', headers: { Authorization: `Bearer ${AUTH_TOKEN}` } })).status, 204);
   t.false(fs.existsSync(path.join(dir, 'shot-1.mp4')));
 });
+
+test.serial('GET /live streams the client screen as MJPEG to an authorized caller and stops ffmpeg when they leave', async (t) => {
+  const { liveArgs } = await import('../src/live.js');
+  const args = liveArgs(':99', 12, 640);
+  t.deepEqual(args.slice(0, 8), ['-loglevel', 'error', '-f', 'x11grab', '-framerate', '12', '-video_size', '1280x720']);
+  t.true(args.includes(':99'));
+  t.true(args.join(' ').includes('scale=640:-2'));
+  t.is(args[args.length - 1], '-');
+  const capped = liveArgs(':99', 999, 99999);
+  t.true(capped.includes('30'));
+  t.true(capped.join(' ').includes('scale=1280:-2'));
+  const { baseUrl, close } = await startServer(AUTH_TOKEN);
+  t.teardown(close);
+  const live = baseUrl.replace(/\/mcp$/, '/live');
+  t.is((await fetch(live)).status, 401);
+  process.env.MC_LIVE_DISPLAY_SOCKET = '/nonexistent/X99';
+  const res = await fetch(live, { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } });
+  delete process.env.MC_LIVE_DISPLAY_SOCKET;
+  t.is(res.status, 503);
+});

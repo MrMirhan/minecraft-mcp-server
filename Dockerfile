@@ -87,11 +87,12 @@ RUN cd node_modules/prismarine-viewer/public/textures \
 # Versions are pinned, not "latest" — a moving HeadlessMC/Fabric Loader/mccli/Fabric API
 # version breaks reproducible builds. Runs offline-mode (fake username/uuid below): the user
 # has no premium account.
+# ffmpeg: mc-cli's `record` encodes with it, and /live streams the screen with it.
 # libegl1 + VirtualGL: with /dev/dri passed in (an Intel or AMD iGPU), the game draws on the GPU through VirtualGL's EGL
 # back end while Xvfb stays the window (docker/client-env.sh decides at launch); without it, llvmpipe draws in software.
 ARG VIRTUALGL_VERSION=3.1.5
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libegl1 libegl-mesa0 libgbm1 x11-xserver-utils procps curl ca-certificates \
+    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libegl1 libegl-mesa0 libgbm1 x11-xserver-utils procps curl ca-certificates ffmpeg \
     && curl -fsSL -o /tmp/virtualgl.deb "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_amd64.deb" \
     && apt-get install -y --no-install-recommends /tmp/virtualgl.deb \
     && rm -f /tmp/virtualgl.deb \
