@@ -70,6 +70,35 @@ test('client-record starts a video with a camera move and waits long enough', as
   t.true(call.args[2].timeoutMs >= 600_000);
 });
 
+test('client-record with a bare file name saves into the recordings folder and says where to download it', async (t) => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-'));
+  process.env.MC_RECORDINGS_DIR = dir;
+  const { mockServer, mockClient } = setup({ request: sinon.stub().resolves({ ok: true, data: { path: path.join(dir, 'shot-1.mp4'), events_path: path.join(dir, 'shot-1.events.json') } }) });
+  const result = await run(mockServer, 'client-record', { action: 'start', path: 'shot-1.mp4', durationMs: 2000, wait: true });
+  t.is((mockClient.request as sinon.SinonStub).getCall(0).args[1].path, path.join(dir, 'shot-1.mp4'));
+  const data = JSON.parse(result.content[0].text);
+  t.is(data.download, '/files/shot-1.mp4');
+  t.is(data.events_download, '/files/shot-1.events.json');
+  delete process.env.MC_RECORDINGS_DIR;
+});
+
+test('client-record refuses a bare name that could leave the recordings folder', async (t) => {
+  const { mockServer } = setup();
+  const result = await run(mockServer, 'client-record', { action: 'start', path: '..hidden.mp4' });
+  t.true(result.isError);
+});
+
+test('client-record forwards a frame-exact render with motion blur and waits long enough for it', async (t) => {
+  const { mockServer, mockClient } = setup();
+  await run(mockServer, 'client-record', { action: 'start', path: '/v/b.mp4', durationMs: 10_000, wait: true, render: true, motionBlur: 4 });
+  const call = (mockClient.request as sinon.SinonStub).getCall(0);
+  t.like(call.args[1], { render: true, motion_blur: 4, duration_ms: 10_000 });
+  t.true(call.args[2].timeoutMs >= 10 * 4 * 4_000);
+});
+
 test('client-camera sends a move object, or the legacy yaw and pitch', async (t) => {
   const { mockServer, mockClient } = setup();
   await run(mockServer, 'client-camera', { move: { action: 'follow', entity: 'Steve' } });

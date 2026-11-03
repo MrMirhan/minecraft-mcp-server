@@ -87,8 +87,14 @@ RUN cd node_modules/prismarine-viewer/public/textures \
 # Versions are pinned, not "latest" — a moving HeadlessMC/Fabric Loader/mccli/Fabric API
 # version breaks reproducible builds. Runs offline-mode (fake username/uuid below): the user
 # has no premium account.
+# libegl1 + VirtualGL: with /dev/dri passed in (an Intel or AMD iGPU), the game draws on the GPU through VirtualGL's EGL
+# back end while Xvfb stays the window (docker/client-env.sh decides at launch); without it, llvmpipe draws in software.
+ARG VIRTUALGL_VERSION=3.1.5
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 x11-xserver-utils procps curl \
+    && apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libglx-mesa0 libegl1 libegl-mesa0 libgbm1 x11-xserver-utils procps curl ca-certificates \
+    && curl -fsSL -o /tmp/virtualgl.deb "https://github.com/VirtualGL/virtualgl/releases/download/${VIRTUALGL_VERSION}/virtualgl_${VIRTUALGL_VERSION}_amd64.deb" \
+    && apt-get install -y --no-install-recommends /tmp/virtualgl.deb \
+    && rm -f /tmp/virtualgl.deb \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=java /opt/java/openjdk /opt/java/openjdk
@@ -106,6 +112,9 @@ ARG MCCLI_FABRIC_JAR_SHA256=ad6ad9a358ebe7be4e9656889626abb5049a8e5d69f3480f9410
 ARG FABRIC_API_FILENAME=fabric-api-0.141.6+1.21.11.jar
 ARG FABRIC_API_MODRINTH_VERSION=6qAuTtLR
 ARG FABRIC_API_JAR_SHA256=bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f
+# Cinematic mods for the 26.2 variant (Sodium, Iris, Flashback, ReplayMod), pinned and checked against Modrinth's sha512
+# by docker/fetch-mods.mjs; empty = none. Shaderpacks are never baked in (their licences): MC_SHADERPACKS fetches them.
+ARG CINEMA_MODS=
 # Optional extra client mod, e.g. GeyserMC Rainbow in the 26.2 variant; empty = none.
 ARG EXTRA_MOD_URL=
 ARG EXTRA_MOD_FILE=
@@ -133,6 +142,9 @@ RUN mkdir -p "${MC_CLIENT_DIR}/game/mods" "${MCCLI_SCREENSHOT_DIR}" \
          curl -fsSL -o "${MC_CLIENT_DIR}/game/mods/${EXTRA_MOD_FILE}" "${EXTRA_MOD_URL}" \
          && echo "${EXTRA_MOD_SHA256}  ${MC_CLIENT_DIR}/game/mods/${EXTRA_MOD_FILE}" | sha256sum -c - ; \
        fi
+
+COPY docker/fetch-mods.mjs docker/client-env.sh /app/docker/
+RUN if [ -n "${CINEMA_MODS}" ]; then node /app/docker/fetch-mods.mjs "${MC_CLIENT_DIR}/game/mods" ${CINEMA_MODS}; fi
 
 # 2. Install Fabric Loader for MC_VERSION. HeadlessMC always keeps the shared library/version/
 #    asset cache at "${user.home}/.minecraft" — `hmc.gamedir` does not relocate it, it only
@@ -184,10 +196,8 @@ RUN { \
       echo '#!/bin/bash'; \
       echo 'set -e'; \
       echo 'export DISPLAY="${DISPLAY:-:99}"'; \
-      echo 'export LIBGL_ALWAYS_SOFTWARE=1'; \
-      echo 'export GALLIUM_DRIVER=llvmpipe'; \
-      echo 'export MESA_GL_VERSION_OVERRIDE=4.5'; \
-      echo 'export MESA_GLSL_VERSION_OVERRIDE=450'; \
+      echo "export MC_CLIENT_DIR=\"${MC_CLIENT_DIR}\""; \
+      echo '. /app/docker/client-env.sh'; \
       echo 'SOCKET="/tmp/.X11-unix/X${DISPLAY#:}"'; \
       echo 'if [ ! -S "$SOCKET" ]; then'; \
       echo '  Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp &'; \
@@ -213,7 +223,7 @@ RUN { \
       echo 'if [ -n "$MCCLI_UUID" ]; then'; \
       echo '  JAVA_ARGS+=(-Dhmc.offline.uuid="$MCCLI_UUID")'; \
       echo 'fi'; \
-      echo "exec java \"\${JAVA_ARGS[@]}\" -jar headlessmc-launcher.jar --command \"launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -offline --jvm -Xmx1536M\" < /dev/null"; \
+      echo "exec \$VGL java \"\${JAVA_ARGS[@]}\" -jar headlessmc-launcher.jar --command \"launch fabric-loader-${FABRIC_LOADER_VERSION}-${MC_VERSION} -offline --jvm -Xmx\${MC_CLIENT_MEMORY:-2G}\" < /dev/null"; \
     } > "${MCCLI_LAUNCH_SCRIPT}" \
     && chmod +x "${MCCLI_LAUNCH_SCRIPT}"
 

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import { downloadPath, isBareName, recordingPath, recordingsDir } from "../recordings.js";
 import { z } from "zod";
 import { ToolFactory } from '../tool-factory.js';
 import { McClient } from '../mc-client.js';
@@ -166,7 +168,7 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
     "Record video with the game's sound inside the client (not a window grab). action start|stop|status. path: absolute .mp4, or .mov/.webm with a transparent layer (gui, tooltip, gui+tooltip). preset max|high|balanced|light; priority smooth (60 fps) or light (30 fps). camera: a move (orbit, path, follow, attach, shot) that starts with the first frame. An events log is written next to the video (eventsPath).",
     {
       action: z.enum(['start', 'stop', 'status']).describe("start, stop or status"),
-      path: z.string().optional().describe("Absolute output path, for start"),
+      path: z.string().optional().describe("Absolute output path, for start; a bare file name (shot-1.mp4) saves it in the recordings folder, fetchable at /files/<name>"),
       preset: z.enum(['max', 'high', 'balanced', 'light']).optional(),
       priority: z.enum(['smooth', 'light']).optional().describe("smooth = 60 fps, light = 30 fps"),
       layer: z.enum(['world', 'gui', 'tooltip', 'gui+tooltip']).optional(),
@@ -174,15 +176,27 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
       durationMs: z.coerce.number().optional().describe("Stop after this long"),
       wait: z.boolean().optional().describe("Return when the file is written (needs durationMs or a timed camera move)"),
       audio: z.boolean().optional().describe("Record the game's sound (default: true)"),
-      hud: z.boolean().optional().describe("Keep the HUD (default: false)")
+      hud: z.boolean().optional().describe("Keep the HUD (default: false)"),
+      render: z.boolean().optional().describe("Frame-exact: every frame rendered at full quality, slower than real time but never choppy (use without a GPU, or with shaders)"),
+      motionBlur: z.coerce.number().int().min(1).max(16).optional().describe("With render: frames blended into each output frame (1 = none)")
     },
-    async ({ action, path: savePath, preset, priority, layer, camera, durationMs, wait, audio, hud }: {
+    async ({ action, path: savePath, preset, priority, layer, camera, durationMs, wait, audio, hud, render, motionBlur }: {
       action: string; path?: string; preset?: string; priority?: string; layer?: string; camera?: Record<string, unknown>;
-      durationMs?: number; wait?: boolean; audio?: boolean; hud?: boolean;
+      durationMs?: number; wait?: boolean; audio?: boolean; hud?: boolean; render?: boolean; motionBlur?: number;
     }) => {
+      // A bare file name is saved in the recordings folder and can be fetched at /files/<name> by a remote caller.
+      let target = savePath;
+      if (savePath && isBareName(savePath)) {
+        const inFolder = recordingPath(savePath);
+        if (!inFolder) {
+          return factory.createErrorResponse(`not a plain file name: ${savePath}`);
+        }
+        fs.mkdirSync(recordingsDir(), { recursive: true });
+        target = inFolder;
+      }
       const params: Record<string, unknown> = {
         action,
-        ...(savePath ? { path: savePath } : {}),
+        ...(target ? { path: target } : {}),
         ...(preset ? { preset } : {}),
         ...(priority ? { priority } : {}),
         ...(layer ? { layer } : {}),
@@ -190,13 +204,22 @@ export function registerClientTools(factory: ToolFactory, mcClient: McClient): v
         ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
         ...(wait !== undefined ? { wait } : {}),
         ...(audio !== undefined ? { audio } : {}),
-        ...(hud !== undefined ? { hud } : {})
+        ...(hud !== undefined ? { hud } : {}),
+        ...(render !== undefined ? { render } : {}),
+        ...(motionBlur !== undefined ? { motion_blur: motionBlur } : {})
       };
-      const result = await mcClient.request('record', params, { timeoutMs: wait ? 660_000 : 30_000 });
+      // a frame-exact render runs slower than real time: up to motion-blur x 60 frames for every second of video
+      const rendered = render ? Math.max(660_000, ((durationMs ?? 10_000) / 1000) * (motionBlur ?? 1) * 4_000 + 120_000) : 660_000;
+      const result = await mcClient.request('record', params, { timeoutMs: wait ? rendered : 30_000 });
       if (!result.ok) {
         return factory.createErrorResponse(result.error);
       }
-      return factory.createResponse(JSON.stringify(result.data));
+      const data = { ...(result.data as Record<string, unknown>) };
+      const download = downloadPath((data.path as string | undefined) ?? target);
+      const events = downloadPath(data.events_path as string | undefined);
+      if (download) data.download = download;
+      if (events) data.events_download = events;
+      return factory.createResponse(JSON.stringify(data));
     },
     { skipConnectionCheck: true }
   );

@@ -181,7 +181,17 @@ export class McClient {
   private async resolveToken(): Promise<string | undefined> {
     if (this.token) return this.token;
     const entry = (await this.listInstances()).find((i) => i.port === this.port && typeof i.tokenFile === 'string');
-    if (!entry) return undefined;
+    if (!entry) {
+      // mc-cli 1.7+ writes its token into the game's config folder; this image's camera client keeps its home apart
+      // from this process, so its instances file is not where we look. Only for the camera client's own port.
+      const tokenFile = process.env.MCCLI_TOKEN_FILE || (process.env.MC_CLIENT_DIR ? `${process.env.MC_CLIENT_DIR}/game/config/mccli-token` : '');
+      if (!tokenFile || (this.port !== DEFAULT_PORT && !process.env.MCCLI_TOKEN_FILE)) return undefined;
+      try {
+        return (await fsp.readFile(tokenFile, 'utf8')).trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    }
     try {
       return (await fsp.readFile(entry.tokenFile as string, 'utf8')).trim();
     } catch {
