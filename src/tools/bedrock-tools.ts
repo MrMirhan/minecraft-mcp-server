@@ -82,7 +82,7 @@ export function registerBedrockTools(factory: ToolFactory, bot: BedrockBot, auth
 
   factory.registerTool(
     "bedrock-forms",
-    "The forms the server opened for the Bedrock bot and it has not answered: a simple form (buttons), a modal (two buttons) or a custom form (inputs, toggles, sliders, dropdowns). Geyser shows Java menus to Bedrock players as these forms.",
+    "The forms the server opened for the Bedrock bot and it has not answered: a simple form (buttons), a modal (two buttons) or a custom form (inputs, toggles, sliders, dropdowns). They come from Floodgate/Cumulus (a plugin's Bedrock form mode) and from Geyser's own forms, such as its translation of Java dialogs. A Java chest menu is not a form: Geyser shows it as a Bedrock inventory, which this bot does not read.",
     {},
     async () => {
       const forms = bot.pendingForms();
