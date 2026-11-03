@@ -1,7 +1,7 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { createMcpServer } from '../src/server-factory.js';
+import { createMcpServer, serverInstructions } from '../src/server-factory.js';
 import { BotConnection } from '../src/bot-connection.js';
 import { MessageStore } from '../src/message-store.js';
 
@@ -51,4 +51,20 @@ test.serial('createMcpServer wires the three connection tools', (t) => {
 test.serial('createMcpServer returns an McpServer instance', (t) => {
   const server = createMcpServer(makeConnection(), new MessageStore());
   t.true(server instanceof McpServer);
+});
+
+test.serial('createMcpServer offers only the chosen tool sets, and its instructions follow them', (t) => {
+  const toolSpy = sinon.spy(McpServer.prototype, 'tool');
+  try {
+    createMcpServer(makeConnection(), new MessageStore(), ['bot', 'scenario']);
+    const names = toolSpy.getCalls().map((call) => call.args[0] as string);
+    t.true(names.includes('get-status') && names.includes('read-window') && names.includes('scenario-run'));
+    for (const name of ['take-screenshot', 'render-window', 'start-viewer']) t.false(names.includes(name), `${name} is not offered`);
+    t.false(names.some((n) => n.startsWith('client-')), 'no real-client tools');
+  } finally {
+    toolSpy.restore();
+  }
+  const text = serverInstructions(['bot', 'scenario']);
+  t.true(text.includes('<game-data>') && text.includes('scenario-run'));
+  t.false(text.includes('start-viewer') || text.includes('render-window'));
 });

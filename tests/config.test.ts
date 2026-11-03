@@ -1,5 +1,5 @@
 import test from 'ava';
-import { parseConfig } from '../src/config.js';
+import { parseConfig, parseToolsets } from '../src/config.js';
 
 test('parseConfig returns default values', (t) => {
   const originalArgv = process.argv;
@@ -178,4 +178,26 @@ test.serial('parseConfig throws on invalid transport value', (t) => {
     t.throws(() => parseConfig(), { message: /Invalid transport/ });
   });
   process.argv = originalArgv;
+});
+
+test('parseToolsets offers every tool set by default, a chosen list otherwise, and refuses unknown names', (t) => {
+  t.deepEqual(parseToolsets(undefined), ['bot', 'render', 'viewer', 'client', 'scenario']);
+  t.deepEqual(parseToolsets(''), ['bot', 'render', 'viewer', 'client', 'scenario']);
+  t.deepEqual(parseToolsets('bot, scenario,bot'), ['bot', 'scenario']);
+  t.throws(() => parseToolsets('bot,cheats'), { message: /Unknown tool set "cheats"/ });
+});
+
+test('parseConfig reads the tool sets from --toolsets, else MC_TOOLSETS', (t) => {
+  const originalArgv = process.argv;
+  const originalEnv = process.env.MC_TOOLSETS;
+  try {
+    process.env.MC_TOOLSETS = 'bot,scenario';
+    process.argv = ['node', 'script.js'];
+    t.deepEqual(parseConfig().toolsets, ['bot', 'scenario']);
+    process.argv = ['node', 'script.js', '--toolsets', 'bot'];
+    t.deepEqual(parseConfig().toolsets, ['bot']);
+  } finally {
+    process.argv = originalArgv;
+    if (originalEnv === undefined) delete process.env.MC_TOOLSETS; else process.env.MC_TOOLSETS = originalEnv;
+  }
 });

@@ -4,7 +4,7 @@ const { pathfinder, Movements } = pathfinderPkg;
 import minecraftData from 'minecraft-data';
 import { WebViewer, attachUiState } from './web-viewer.js';
 
-const SUPPORTED_MINECRAFT_VERSION = '1.21.11';
+const SUPPORTED_MINECRAFT_VERSION = '26.1.2';
 
 type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 

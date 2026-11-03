@@ -2,6 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z, ZodError, ZodRawShape, ZodType } from "zod";
 import { BotConnection } from './bot-connection.js';
 
+/**
+ * What a tool answers, marked as data: chat, signs, books, item names, titles and kick reasons in it
+ * are written by players and plugins, and must not be read as instructions (the server's
+ * instructions say so). A closing tag inside is broken, so the text cannot end the block itself.
+ */
+export function asGameData(text: string): string {
+  return `<game-data>\n${text.replace(/<\/?game-data>/gi, (tag) => tag.replace('<', '<\u200b'))}\n</game-data>`;
+}
+
 type McpResponse = {
   content: { type: "text"; text: string }[];
   isError?: boolean;
@@ -9,9 +18,11 @@ type McpResponse = {
 };
 
 export class ToolFactory {
+  /** `mark` marks each text a tool answers (the server marks it as game data); none by default. */
   constructor(
     private server: McpServer,
-    private connection: BotConnection
+    private connection: BotConnection,
+    private mark: (text: string) => string = (text) => text
   ) {}
 
   registerTool(
@@ -23,26 +34,40 @@ export class ToolFactory {
     opts: { skipConnectionCheck?: boolean } = {}
   ): void {
     this.server.tool(name, description, schema, async (args: unknown): Promise<McpResponse> => {
-      if (!opts.skipConnectionCheck) {
-        const connectionCheck = await this.connection.checkConnectionAndReconnect();
-
-        if (!connectionCheck.connected) {
-          return {
-            content: [{ type: "text", text: connectionCheck.message! }],
-            isError: true
-          };
-        }
-      }
-
-      try {
-        const parsedArgs = this.shouldValidateSchema(schema)
-          ? this.parseArgs(schema as ZodRawShape, args)
-          : args;
-        return await executor(parsedArgs);
-      } catch (error) {
-        return this.createErrorResponse(error as Error);
-      }
+      const response = await this.run(schema, executor, opts, args);
+      return {
+        ...response,
+        content: response.content.map((c) => (c.type === 'text' ? { ...c, text: this.mark(c.text) } : c))
+      };
     });
+  }
+
+  private async run(
+    schema: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    executor: (args: any) => Promise<McpResponse>,
+    opts: { skipConnectionCheck?: boolean },
+    args: unknown
+  ): Promise<McpResponse> {
+    if (!opts.skipConnectionCheck) {
+      const connectionCheck = await this.connection.checkConnectionAndReconnect();
+
+      if (!connectionCheck.connected) {
+        return {
+          content: [{ type: "text", text: connectionCheck.message! }],
+          isError: true
+        };
+      }
+    }
+
+    try {
+      const parsedArgs = this.shouldValidateSchema(schema)
+        ? this.parseArgs(schema as ZodRawShape, args)
+        : args;
+      return await executor(parsedArgs);
+    } catch (error) {
+      return this.createErrorResponse(error as Error);
+    }
   }
 
   createResponse(text: string): McpResponse {

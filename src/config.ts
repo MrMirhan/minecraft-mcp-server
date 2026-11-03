@@ -3,6 +3,27 @@ import { hideBin } from 'yargs/helpers';
 
 export type TransportKind = 'stdio' | 'http';
 
+/**
+ * The groups of tools a server offers. bot: the mineflayer bot; render: pictures drawn without a
+ * client (canvas); viewer: the live browser view (prismarine-viewer, puppeteer); client: the real
+ * client through mc-cli; scenario: scripted multi-bot tests.
+ */
+export const TOOLSETS = ['bot', 'render', 'viewer', 'client', 'scenario'] as const;
+export type Toolset = typeof TOOLSETS[number];
+
+/** The tool sets in a comma-separated list; all of them when it is empty. */
+export function parseToolsets(value: string | undefined): Toolset[] {
+  const names = (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return [...TOOLSETS];
+  }
+  const unknown = names.filter((n) => !(TOOLSETS as readonly string[]).includes(n));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown tool set "${unknown.join('", "')}". Expected some of: ${TOOLSETS.join(', ')}.`);
+  }
+  return [...new Set(names)] as Toolset[];
+}
+
 export interface ServerConfig {
   host: string;
   port: number;
@@ -11,6 +32,7 @@ export interface ServerConfig {
   httpPort: number;
   authToken: string | undefined;
   explicitHost: boolean;
+  toolsets: Toolset[];
 }
 
 const DEFAULT_MC_HOST = 'localhost';
@@ -58,6 +80,10 @@ export function parseConfig(): ServerConfig {
       type: 'string',
       description: 'Bearer token required by the http transport (falls back to MCP_AUTH_TOKEN)'
     })
+    .option('toolsets', {
+      type: 'string',
+      description: `Tool sets to offer, comma-separated: ${TOOLSETS.join(', ')} (falls back to MC_TOOLSETS; default all)`
+    })
     .help()
     .alias('help', 'h')
     .parseSync();
@@ -84,6 +110,7 @@ export function parseConfig(): ServerConfig {
     transport,
     httpPort,
     authToken,
-    explicitHost: hostFlagPassed || hostEnv !== undefined
+    explicitHost: hostFlagPassed || hostEnv !== undefined,
+    toolsets: parseToolsets(argv.toolsets ?? envString('MC_TOOLSETS'))
   };
 }
