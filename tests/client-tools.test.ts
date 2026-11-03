@@ -9,7 +9,7 @@ import type { McClient, McClientStatus, McCommandResult } from '../src/mc-client
 const TOOL_NAMES = [
   'client-status', 'client-set-username', 'client-capture', 'client-use-item', 'client-close-screen',
   'client-inventory', 'client-item', 'client-block', 'client-entity',
-  'client-teleport', 'client-camera', 'client-gamemode', 'client-spectate',
+  'client-teleport', 'client-camera', 'client-gamemode', 'client-size', 'client-spectate',
   'client-connect', 'client-disconnect', 'client-execute',
   'client-slots', 'client-hover', 'client-click', 'client-slot-click', 'client-key', 'client-type', 'client-interact'
 ];
@@ -98,7 +98,9 @@ test('client-* tools run even when the mineflayer bot is not connected (skipConn
                         ? { text: 'hi' }
                       : name === 'client-interact'
                         ? { target: 'block' }
-                        : {};
+                        : name === 'client-size'
+                          ? { width: 1080, height: 1920 }
+                          : {};
 
     const result = await executor(args);
     const text = result.content[0].type === 'text' ? result.content[0].text : '';
@@ -320,6 +322,15 @@ test('client-gamemode runs an execute command', async (t) => {
   t.true(result.content[0].text.includes('creative'));
 });
 
+test('client-size sets the headless frame size through the window command', async (t) => {
+  const { mockServer, mockClient } = setup();
+  const { executor } = getExecutor(mockServer, 'client-size');
+
+  await executor({ width: 1080, height: 1920 });
+
+  t.true((mockClient.request as sinon.SinonStub).calledWith('window', { action: 'size', width: 1080, height: 1920 }));
+});
+
 test('client-spectate spectates a player when one is given', async (t) => {
   const { mockServer, mockClient } = setup();
   const { executor } = getExecutor(mockServer, 'client-spectate');
@@ -399,7 +410,9 @@ test('every client-* tool returns a text error, not a throw, when the client is 
                         ? { text: 'hi' }
                       : name === 'client-interact'
                         ? { target: 'block' }
-                        : {};
+                        : name === 'client-size'
+                          ? { width: 1080, height: 1920 }
+                          : {};
 
     const result = await executor(args);
     t.true(result.isError, `${name} must mark isError on failure`);

@@ -151,7 +151,7 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
         sendJson(res, 401, jsonRpcError(-32001, "Unauthorized: missing or invalid bearer token"));
         return;
       }
-      serveLive(req, res, log);
+      void serveLive(req, res, log);
       return;
     }
 
