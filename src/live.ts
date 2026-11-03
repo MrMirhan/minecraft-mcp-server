@@ -21,7 +21,7 @@ export function macLiveArgs(screen: string, fps: number, width: number): string[
   const rate = Math.max(1, Math.min(30, Math.round(fps) || 10));
   const w = Math.max(160, Math.min(1920, Math.round(width) || 640));
   return ["-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "0", "-pixel_format", "nv12", "-framerate", String(rate), "-i", `${screen}:none`,
-    "-vf", `scale=${w}:-2`, "-q:v", "7", "-f", "mpjpeg", "-"];
+    "-vf", `scale=${w}:-2`, "-r", String(rate), "-q:v", "7", "-f", "mpjpeg", "-"];
 }
 
 export function serveLive(req: http.IncomingMessage, res: http.ServerResponse, log: (level: string, message: string) => void): void {
@@ -49,7 +49,13 @@ export function serveLive(req: http.IncomingMessage, res: http.ServerResponse, l
   res.writeHead(200, { "Content-Type": "multipart/x-mixed-replace; boundary=ffmpeg", "Cache-Control": "no-store", Connection: "keep-alive" });
   ffmpeg.stdout.pipe(res);
   ffmpeg.stderr.on("data", (d: Buffer) => log("warn", `live: ${d.toString().trim().slice(0, 200)}`));
-  const stop = () => { if (!ffmpeg.killed) ffmpeg.kill("SIGTERM"); };
+  // The screen has one reader at a time on macOS: a viewer that leaves must not leave ffmpeg holding it.
+  const stop = () => {
+    if (ffmpeg.exitCode !== null || ffmpeg.signalCode !== null) return;
+    ffmpeg.kill("SIGTERM");
+    setTimeout(() => { if (ffmpeg.exitCode === null && ffmpeg.signalCode === null) ffmpeg.kill("SIGKILL"); }, 2000).unref();
+  };
+  res.on("close", stop);
   ffmpeg.on("close", () => { viewers--; if (!res.writableEnded) res.end(); });
   ffmpeg.on("error", (err) => { log("error", `live: ${err.message}`); if (!res.writableEnded) res.end(); });
   req.on("close", stop);
