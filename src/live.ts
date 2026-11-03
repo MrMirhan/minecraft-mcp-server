@@ -25,7 +25,7 @@ export function macLiveArgs(screen: string, fps: number, width: number): string[
 }
 
 /** The camera mod's own preview stream (mc-cli 1.9+, GET /live on its MCP port), with its access token. */
-export function modLive(env: NodeJS.ProcessEnv, fps: number, width: number): { url: string; token?: string } {
+export function modLive(env: Record<string, string | undefined>, fps: number, width: number): { url: string; token?: string } {
   const host = env.MCCLI_HOST || "127.0.0.1";
   const port = Number(env.MCCLI_MCP_PORT) || 25590;
   const rate = Math.max(1, Math.min(30, Math.round(fps) || 10));

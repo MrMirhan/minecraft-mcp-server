@@ -198,7 +198,7 @@ test.serial('GET /live streams the client screen as MJPEG to an authorized calle
   t.true(mac.includes('Capture screen 0:none'));
   t.true(mac.join(' ').includes('scale=960:-2'));
   const { modLive } = await import('../src/live.js');
-  const m = modLive({ MCCLI_HOST: '10.0.0.2', MCCLI_TOKEN: 'tok' } as NodeJS.ProcessEnv, 99, 50);
+  const m = modLive({ MCCLI_HOST: '10.0.0.2', MCCLI_TOKEN: 'tok' }, 99, 50);
   t.is(m.url, 'http://10.0.0.2:25590/live?fps=30&width=160');
   t.is(m.token, 'tok');
   const capped = liveArgs(':99', 999, 99999);
