@@ -20,7 +20,7 @@ export function liveArgs(display: string, fps: number, width: number): string[] 
 export function macLiveArgs(screen: string, fps: number, width: number): string[] {
   const rate = Math.max(1, Math.min(30, Math.round(fps) || 10));
   const w = Math.max(160, Math.min(1920, Math.round(width) || 640));
-  return ["-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "0", "-framerate", String(rate), "-i", `${screen}:none`,
+  return ["-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "0", "-pixel_format", "nv12", "-framerate", String(rate), "-i", `${screen}:none`,
     "-vf", `scale=${w}:-2`, "-q:v", "7", "-f", "mpjpeg", "-"];
 }
 

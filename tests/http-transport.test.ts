@@ -194,7 +194,7 @@ test.serial('GET /live streams the client screen as MJPEG to an authorized calle
   t.is(args[args.length - 1], '-');
   const { macLiveArgs } = await import('../src/live.js');
   const mac = macLiveArgs('Capture screen 0', 15, 960);
-  t.deepEqual(mac.slice(0, 9), ['-loglevel', 'error', '-f', 'avfoundation', '-capture_cursor', '0', '-framerate', '15', '-i']);
+  t.deepEqual(mac.slice(0, 11), ['-loglevel', 'error', '-f', 'avfoundation', '-capture_cursor', '0', '-pixel_format', 'nv12', '-framerate', '15', '-i']);
   t.true(mac.includes('Capture screen 0:none'));
   t.true(mac.join(' ').includes('scale=960:-2'));
   const capped = liveArgs(':99', 999, 99999);
