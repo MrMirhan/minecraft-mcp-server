@@ -20,7 +20,10 @@ const INIT_REQUEST = {
 
 const ACCEPT = 'application/json, text/event-stream';
 
-function startServer(authToken: string | undefined): Promise<{ baseUrl: string; close: () => void }> {
+function startServer(
+  authToken: string | undefined,
+  limits: { maxSessions?: number; sessionIdleMs?: number } = {}
+): Promise<{ baseUrl: string; close: () => void }> {
   return new Promise((resolve) => {
     const connection = new BotConnection(
       { host: 'localhost', port: 25565, username: 'LLMBot' },
@@ -31,7 +34,8 @@ function startServer(authToken: string | undefined): Promise<{ baseUrl: string; 
       port: 0,
       authToken,
       createServer: () => createMcpServer(connection, messageStore),
-      log: () => undefined
+      log: () => undefined,
+      ...limits
     });
     server.on('listening', () => {
       const { port } = server.address() as AddressInfo;
@@ -129,6 +133,56 @@ test.serial('initialize returns server instructions', async (t) => {
   t.truthy(instructions);
   t.true(instructions!.includes('get-status'));
   t.true(instructions!.includes('does not see the client'));
+});
+
+async function openSession(baseUrl: string): Promise<string> {
+  const res = await fetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: ACCEPT, Authorization: `Bearer ${AUTH_TOKEN}` },
+    body: JSON.stringify(INIT_REQUEST)
+  });
+  await res.text();
+  return res.headers.get('mcp-session-id') as string;
+}
+
+async function listStatus(baseUrl: string, sessionId: string): Promise<number> {
+  const res = await fetch(baseUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: ACCEPT,
+      Authorization: `Bearer ${AUTH_TOKEN}`,
+      'mcp-session-id': sessionId
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
+  });
+  await res.text();
+  return res.status;
+}
+
+// Clients that never end their session (one session per call) must not grow the process until it runs out of memory.
+test.serial('the least recently used session is closed when the session limit is reached', async (t) => {
+  const { baseUrl, close } = await startServer(AUTH_TOKEN, { maxSessions: 2 });
+  t.teardown(close);
+
+  const first = await openSession(baseUrl);
+  const second = await openSession(baseUrl);
+  t.is(await listStatus(baseUrl, first), 200);
+  const third = await openSession(baseUrl);
+
+  t.is(await listStatus(baseUrl, second), 400);
+  t.is(await listStatus(baseUrl, first), 200);
+  t.is(await listStatus(baseUrl, third), 200);
+});
+
+test.serial('a session left idle is closed', async (t) => {
+  const { baseUrl, close } = await startServer(AUTH_TOKEN, { sessionIdleMs: 150 });
+  t.teardown(close);
+
+  const id = await openSession(baseUrl);
+  t.is(await listStatus(baseUrl, id), 200);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  t.is(await listStatus(baseUrl, id), 400);
 });
 
 test.serial('POST /mcp with unknown session ID returns 400', async (t) => {

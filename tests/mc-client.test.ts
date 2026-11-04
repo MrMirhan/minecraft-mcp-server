@@ -11,7 +11,7 @@ const TEST_SCREENSHOT_DIR = path.join(os.tmpdir(), 'mc-client-test-screenshots')
 
 type Handler = (request: { id?: string; command: string; params?: Record<string, unknown> }, socket: Socket) => void | Promise<void>;
 
-function startFakeServer(handler: Handler): Promise<{ port: number; close: () => Promise<void> }> {
+function startFakeServer(handler: Handler, listenPort = 0): Promise<{ port: number; close: () => Promise<void> }> {
   return new Promise((resolve) => {
     const server = net.createServer((socket) => {
       let buffer = '';
@@ -24,7 +24,7 @@ function startFakeServer(handler: Handler): Promise<{ port: number; close: () =>
       });
     });
 
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(listenPort, '127.0.0.1', () => {
       const { port } = server.address() as AddressInfo;
       resolve({
         port,
@@ -209,7 +209,13 @@ test('getStatus reports not_started before any request is made', async (t) => {
 
 test('getStatus reports exited with diagnostics after the process exits before becoming reachable', async (t) => {
   const child = fakeChild();
-  const spawnFn = () => child;
+  const spawnFn = () => {
+    setImmediate(() => {
+      (child.stdout as unknown as EventEmitter).emit('data', Buffer.from('booting client\n'));
+      child.emit('exit', 1, null);
+    });
+    return child;
+  };
 
   const client = new McClient({
     host: '127.0.0.1',
@@ -220,8 +226,6 @@ test('getStatus reports exited with diagnostics after the process exits before b
   });
 
   const requestPromise = client.request('status', {});
-  (child.stdout as unknown as EventEmitter).emit('data', Buffer.from('booting client\n'));
-  child.emit('exit', 1, null);
 
   const result = await requestPromise;
   t.false(result.ok);
@@ -260,15 +264,21 @@ test('getStatus reports the spawn error when the launch script itself cannot sta
   t.true(status.spawnError!.includes('ENOENT'));
 });
 
-test('request auto-launches once, connects, and reuses the running process on the next call', async (t) => {
-  const { port, close } = await startFakeServer((req, socket) => {
-    reply(socket, { id: req.id, success: true, data: {} });
-  });
+async function freePort(): Promise<number> {
+  const probe = await startFakeServer(() => undefined);
+  await probe.close();
+  return probe.port;
+}
 
+test('request auto-launches once, connects, and reuses the running process on the next call', async (t) => {
+  const port = await freePort();
+  let game: { close: () => Promise<void> } | undefined;
   const child = fakeChild();
   let spawnCount = 0;
   const spawnFn = () => {
     spawnCount++;
+    // the game opens its socket a moment after the launch script starts
+    void startFakeServer((req, socket) => reply(socket, { id: req.id, success: true, data: {} }), port).then((s) => { game = s; });
     return child;
   };
 
@@ -280,6 +290,26 @@ test('request auto-launches once, connects, and reuses the running process on th
   t.true(first.ok);
   t.true(second.ok);
   t.is(spawnCount, 1);
+  await game?.close();
+});
+
+// After this server restarts, the game it launched before is still running: launching another one would leave two
+// clients with the same account, the second on the next port, each holding gigabytes.
+test('request uses a game already listening on the port instead of launching another', async (t) => {
+  const { port, close } = await startFakeServer((req, socket) => {
+    reply(socket, { id: req.id, success: true, data: {} });
+  });
+
+  let spawnCount = 0;
+  const spawnFn = () => {
+    spawnCount++;
+    return fakeChild();
+  };
+
+  const client = new McClient({ host: '127.0.0.1', port, launchScript: '/fake.sh', spawnFn, launchTimeoutMs: 2000 });
+
+  t.true((await client.request('status', {})).ok);
+  t.is(spawnCount, 0);
   await close();
 });
 
@@ -363,14 +393,26 @@ test('setUsername records the new value without restarting when the client is no
   t.is(status.username, 'NewName');
 });
 
+// The game's socket opens with the first launch, as for a real client (a game already listening would be adopted).
+async function gameOnFirstSpawn(): Promise<{ port: number; started: () => void; close: () => Promise<void> }> {
+  const port = await freePort();
+  let game: Promise<{ close: () => Promise<void> }> | undefined;
+  return {
+    port,
+    started: () => {
+      game ??= startFakeServer((req, socket) => reply(socket, { id: req.id, success: true, data: {} }), port);
+    },
+    close: async () => { await (await game)?.close(); }
+  };
+}
+
 test('setUsername kills the running process and relaunches it with the new username', async (t) => {
-  const { port, close } = await startFakeServer((req, socket) => {
-    reply(socket, { id: req.id, success: true, data: {} });
-  });
+  const { port, started, close } = await gameOnFirstSpawn();
 
   const children: ChildProcess[] = [];
   const killSignals: (string | undefined)[] = [];
   const spawnFn = () => {
+    started();
     const child = new EventEmitter() as unknown as ChildProcess;
     Object.assign(child, {
       pid: 1000 + children.length,
@@ -407,13 +449,12 @@ test('setUsername kills the running process and relaunches it with the new usern
 });
 
 test('setUsername stops the whole process group, so the game under the launch script cannot outlive it', async (t) => {
-  const { port, close } = await startFakeServer((req, socket) => {
-    reply(socket, { id: req.id, success: true, data: {} });
-  });
+  const { port, started, close } = await gameOnFirstSpawn();
 
   const children: ChildProcess[] = [];
   const spawnOptions: SpawnOptions[] = [];
   const spawnFn = (_command: string, _args: readonly string[], options: SpawnOptions) => {
+    started();
     spawnOptions.push(options);
     const child = new EventEmitter() as unknown as ChildProcess;
     Object.assign(child, { pid: 1000 + children.length, stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });

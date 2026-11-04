@@ -14,7 +14,14 @@ export interface HttpTransportOptions {
   authToken: string | undefined;
   createServer: () => McpServer;
   log: (level: string, message: string) => void;
+  /** Open sessions kept at most; the least recently used one is closed first. Default 32. */
+  maxSessions?: number;
+  /** A session with no request for this long is closed. Default 15 minutes. */
+  sessionIdleMs?: number;
 }
+
+const DEFAULT_MAX_SESSIONS = 32;
+const DEFAULT_SESSION_IDLE_MS = 15 * 60 * 1000;
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -47,7 +54,37 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
 
 export function startHttpTransport(options: HttpTransportOptions): http.Server {
   const { port, authToken, createServer, log } = options;
-  const transports: Record<string, StreamableHTTPServerTransport> = {};
+  // Each session holds its own McpServer with every tool registered. A client that opens a session per call and
+  // never ends it (DELETE) would grow the process until it runs out of memory, so sessions are capped and expire.
+  // Map order is the use order: a request moves its session to the end.
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+  const lastSeen = new Map<string, number>();
+  const maxSessions = Math.max(1, options.maxSessions ?? DEFAULT_MAX_SESSIONS);
+  const idleMs = options.sessionIdleMs ?? DEFAULT_SESSION_IDLE_MS;
+
+  const touch = (id: string): StreamableHTTPServerTransport | undefined => {
+    const transport = transports.get(id);
+    if (!transport) return undefined;
+    transports.delete(id);
+    transports.set(id, transport);
+    lastSeen.set(id, Date.now());
+    return transport;
+  };
+
+  const closeSession = (id: string): void => {
+    const transport = transports.get(id);
+    transports.delete(id);
+    lastSeen.delete(id);
+    transport?.close().catch(() => undefined);
+  };
+
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    for (const [id, seen] of lastSeen) {
+      if (now - seen > idleMs) closeSession(id);
+    }
+  }, Math.max(50, Math.min(60_000, Math.floor(idleMs / 2))));
+  sweep.unref();
 
   if (!authToken) {
     log('warn', `${MCP_PATH} endpoint is running WITHOUT authentication (set MCP_AUTH_TOKEN to require a bearer token).`);
@@ -79,20 +116,27 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
     }
 
     let transport: StreamableHTTPServerTransport;
-    if (sessionId && transports[sessionId]) {
-      transport = transports[sessionId];
+    const known = sessionId ? touch(sessionId) : undefined;
+    if (known) {
+      transport = known;
     } else if (!sessionId && isInitializeRequest(body)) {
       // A fresh McpServer is created per session, but every session shares the
       // single process-wide BotConnection captured by createServer().
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
-          transports[id] = transport;
+          while (transports.size >= maxSessions) {
+            const oldest = transports.keys().next().value as string;
+            closeSession(oldest);
+          }
+          transports.set(id, transport);
+          lastSeen.set(id, Date.now());
         }
       });
       transport.onclose = () => {
-        if (transport.sessionId) {
-          delete transports[transport.sessionId];
+        if (transport.sessionId && transports.get(transport.sessionId) === transport) {
+          transports.delete(transport.sessionId);
+          lastSeen.delete(transport.sessionId);
         }
       };
       const server = createServer();
@@ -107,11 +151,12 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
 
   const handleSessionRequest = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
-    if (!sessionId || !transports[sessionId]) {
+    const transport = sessionId ? touch(sessionId) : undefined;
+    if (!transport) {
       sendJson(res, 400, jsonRpcError(-32000, "Bad Request: missing or unknown session ID"));
       return;
     }
-    await transports[sessionId].handleRequest(req, res);
+    await transport.handleRequest(req, res);
   };
 
   // GET streams a recording, DELETE removes it once the caller has its copy.
@@ -197,5 +242,9 @@ export function startHttpTransport(options: HttpTransportOptions): http.Server {
     log('info', `Listening on port ${port} (MCP Streamable HTTP at ${MCP_PATH})`);
   });
 
+  server.on('close', () => {
+    clearInterval(sweep);
+    for (const id of [...transports.keys()]) closeSession(id);
+  });
   return server;
 }
