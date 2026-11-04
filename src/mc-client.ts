@@ -122,6 +122,7 @@ function freshState(previousLogLines: string[] = []): ProcessState {
 export class McClient {
   private host: string;
   private port: number;
+  private everSpawned = false;
   private token: string | undefined;
   private targetName = 'camera';
   private readonly registryHome: string;
@@ -382,6 +383,7 @@ export class McClient {
   }
 
   private spawnProcess(): void {
+    this.everSpawned = true;
     this.state = freshState(this.state.logLines);
     this.state.startedAt = Date.now();
 
@@ -430,6 +432,13 @@ export class McClient {
 
   private async ensureLaunched(): Promise<McCommandResult> {
     if (this.isProcessAlive() && await this.probeSocket(PROBE_TIMEOUT_MS)) {
+      return { ok: true, data: {} };
+    }
+    // Before this server launched anything, a game already answering on the port is used as it is: after a restart
+    // of this server the game it launched before keeps running, and a second launch would only add another client
+    // (same account, next port, gigabytes each). After a launch of our own, a game we stopped may still hold the port
+    // for a moment, so it is not adopted then.
+    if (!this.everSpawned && !this.isProcessAlive() && await this.probeSocket(PROBE_TIMEOUT_MS)) {
       return { ok: true, data: {} };
     }
 
